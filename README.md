@@ -42,12 +42,6 @@ go mod tidy
 go build ./...
 ```
 
-### Install Smoke CLI
-
-```bash
-go install ./cmd/autoscan-engine
-```
-
 ---
 
 ## Usage
@@ -72,36 +66,12 @@ report, _ := runner.Run(context.Background(), "/path/to/submissions", engine.Run
 _ = report
 ```
 
-### Smoke CLI
-
-```bash
-autoscan-engine run \
-  -policy /path/to/policy.yaml \
-  -root /path/to/submissions
-```
-
-```bash
-autoscan-engine similarity \
-  -policy /path/to/policy.yaml \
-  -root /path/to/submissions \
-  -source-file lab03.c
-```
-
-```bash
-autoscan-engine ai-detect \
-  -policy /path/to/policy.yaml \
-  -root /path/to/submissions \
-  -source-file lab03.c \
-  -dictionary /path/to/ai_dictionary.yaml
-```
-
 ---
 
 ## Package Layout
 
 ```text
 autOScan-engine/
-├── cmd/autoscan-engine/   # Optional smoke CLI
 ├── pkg/engine/            # Public facade API
 ├── pkg/domain/            # Shared engine models/results
 ├── pkg/policy/            # Policy models/loading/helpers
