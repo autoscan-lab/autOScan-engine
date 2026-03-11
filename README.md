@@ -1,53 +1,132 @@
-# autOScan Engine
+<h1 align="center">autOScan Engine</h1>
 
-Core grading engine for the autOScan ecosystem.
+<p align="center">
+  <strong>Shared grading engine for C lab submission analysis</strong>
+</p>
 
-This repository is intended to host shared grading logic used by multiple clients:
-- `autOScan` TUI
-- future `autOScan Studio` macOS GUI
-- potential CI/batch tooling
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/go-1.22+-00ADD8?style=flat&logo=go&logoColor=white" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/type-engine-1f6feb?style=flat" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/compiler-gcc-A42E2B?style=flat" /></a>
+</p>
 
-## Status
+<p align="center">
+  Core module used by autOScan clients (TUI, GUI, and automation tooling)
+</p>
 
-Scaffolded repository with architecture and migration documentation.
-Code extraction from the current `autOScan` repository is planned next.
+---
 
-## Goals
+## Features
 
-1. Keep grading behavior consistent across all clients.
-2. Separate core logic from UI concerns.
-3. Make engine versioning and testing independent from interface apps.
+- Submission discovery from root folders
+- Parallel compilation pipeline with worker controls
+- Single-process execution with args/stdin/test-case support
+- Multi-process execution with live process output aggregation
+- Banned function scanning with file/line/column/snippet evidence
+- Similarity analysis via C token fingerprinting
+- AI-pattern detection against dictionary fingerprints
+- Policy parsing and validation helpers
+- JSON and CSV export helpers for run reports
+- Public Go facade package (`pkg/engine`) for consumer apps
 
-## Planned Scope
+---
 
-- Submission discovery
-- Compilation pipeline
-- Runtime execution (single and multi-process)
-- Banned call scanning
-- Similarity and AI-detection analysis
-- Policy loading/validation
-- Structured report output
+## Installation
 
-## Planned Non-Goals (v1)
+### Build from Source
 
-- UI rendering
-- editor widgets
-- terminal UX
-- SSH connection management
+```bash
+git clone <your-private-repo-url>
+cd autOScan-engine
+go mod tidy
+go build ./...
+```
 
-## Initial Repository Layout (planned)
+### Install Smoke CLI
+
+```bash
+go install ./cmd/autoscan-engine
+```
+
+---
+
+## Usage
+
+### As a Go Module
+
+```bash
+go get github.com/felitrejos/autoscan-engine@latest
+```
+
+```go
+import (
+  "context"
+
+  engine "github.com/felitrejos/autoscan-engine/pkg/engine"
+  "github.com/felitrejos/autoscan-engine/pkg/policy"
+)
+
+p, _ := policy.Load("/path/to/policy.yaml")
+runner, _ := engine.NewRunner(p, engine.WithWorkers(4))
+report, _ := runner.Run(context.Background(), "/path/to/submissions", engine.RunnerCallbacks{})
+_ = report
+```
+
+### Smoke CLI
+
+```bash
+autoscan-engine run \
+  -policy /path/to/policy.yaml \
+  -root /path/to/submissions
+```
+
+```bash
+autoscan-engine similarity \
+  -policy /path/to/policy.yaml \
+  -root /path/to/submissions \
+  -source-file lab03.c
+```
+
+```bash
+autoscan-engine ai-detect \
+  -policy /path/to/policy.yaml \
+  -root /path/to/submissions \
+  -source-file lab03.c \
+  -dictionary /path/to/ai_dictionary.yaml
+```
+
+---
+
+## Package Layout
 
 ```text
 autOScan-engine/
-  cmd/                    # optional CLI wrappers around engine APIs
-  pkg/engine/             # public engine facade and orchestrators
-  internal/...            # implementation details
-  docs/
-    ARCHITECTURE.md
-    MIGRATION_PLAN.md
-    PRODUCT_SCOPE.md
+├── cmd/autoscan-engine/   # Optional smoke CLI
+├── pkg/engine/            # Public facade API
+├── pkg/domain/            # Shared engine models/results
+├── pkg/policy/            # Policy models/loading/helpers
+├── pkg/ai/                # AI dictionary parsing/validation
+├── pkg/export/            # JSON/CSV report exporters
+└── internal/engine/       # Engine internals
 ```
 
-## Next Step
+---
 
-Follow `docs/MIGRATION_PLAN.md` to extract engine packages from `autOScan` while preserving behavior.
+## Runtime Paths
+
+Engine runtime behavior is compatible with:
+
+```text
+~/.config/autoscan/
+├── libraries/
+├── test_files/
+├── expected_outputs/
+└── banned.yaml
+```
+
+---
+
+## Docs
+
+- `docs/ARCHITECTURE.md`
+- `docs/PRODUCT_SCOPE.md`
