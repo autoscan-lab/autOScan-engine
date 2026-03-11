@@ -1,24 +1,22 @@
 # Product Scope
 
-## What this repository is
+## This Repository Is
 
-A shared grading engine and data-contract layer.
+- Shared grading engine
+- Shared data contracts for grading outputs
 
-## What this repository is not
+## This Repository Is Not
 
-- terminal app UI
-- desktop GUI
-- SSH/session manager
-- code editor frontend
+- TUI/GUI app code
+- SSH/session management
+- Editor/IDE functionality
 
 ## Consumers
 
 1. `autOScan` terminal app
-2. future `autOScan Studio` macOS app
-3. potential batch/CI tooling
+2. `autOScan Studio` macOS app
+3. batch/CI tooling
 
-## Why split
+## Goal
 
-1. one source of truth for grading logic
-2. lower maintenance cost than duplicated logic
-3. faster UI iteration in each client
+Single source of truth for grading behavior across all clients.
