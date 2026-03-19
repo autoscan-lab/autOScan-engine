@@ -34,13 +34,16 @@ type Executor struct {
 func NewExecutorWithOptions(p *policy.Policy, binaryDir string, shortNames bool) *Executor {
 	outputName := strings.TrimSuffix(p.Compile.SourceFile, ".c")
 
-	home, _ := os.UserHomeDir()
+	configDir, err := policy.ConfigDir()
+	if err != nil {
+		configDir = filepath.Join(".", ".autoscan")
+	}
 	return &Executor{
 		policy:             p,
 		binaryDir:          binaryDir,
 		outputName:         outputName,
-		testFilesDir:       filepath.Join(home, ".config", "autoscan", "test_files"),
-		expectedOutputsDir: filepath.Join(home, ".config", "autoscan", "expected_outputs"),
+		testFilesDir:       filepath.Join(configDir, "test_files"),
+		expectedOutputsDir: filepath.Join(configDir, "expected_outputs"),
 		shortNames:         shortNames,
 	}
 }

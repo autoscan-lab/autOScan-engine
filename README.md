@@ -28,6 +28,7 @@
 - Policy parsing and validation helpers
 - JSON and CSV export helpers for run reports
 - Public Go facade package (`pkg/engine`) for consumer apps
+- `autoscan-bridge` companion CLI for GUI integrations
 
 ---
 
@@ -40,6 +41,13 @@ git clone <your-private-repo-url>
 cd autOScan-engine
 go mod tidy
 go build ./...
+```
+
+### Build the Studio Bridge
+
+```bash
+make build-bridge
+./dist/autoscan-bridge version
 ```
 
 ---
@@ -65,6 +73,26 @@ runner, _ := engine.NewRunner(p, engine.WithWorkers(4))
 report, _ := runner.Run(context.Background(), "/path/to/submissions", engine.RunnerCallbacks{})
 _ = report
 ```
+
+### As a Companion CLI
+
+The bridge is intended for apps such as `autOScan Studio` that need a stable
+process boundary into the engine.
+
+```bash
+./dist/autoscan-bridge run-session \
+  --workspace /path/to/submissions \
+  --policy /path/to/policy.yaml
+```
+
+The bridge writes newline-delimited JSON events to stdout:
+
+- `started`
+- `discovery_complete`
+- `compile_complete`
+- `scan_complete`
+- `run_complete`
+- `error`
 
 ---
 
@@ -93,6 +121,9 @@ Engine runtime behavior is compatible with:
 ├── expected_outputs/
 └── banned.yaml
 ```
+
+Set `AUTOSCAN_CONFIG_DIR` to override the default config location when embedding
+the engine or using the bridge from another app.
 
 ---
 

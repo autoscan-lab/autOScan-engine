@@ -78,8 +78,32 @@ func Load(path string) (*Policy, error) {
 	return &p, nil
 }
 
+func LoadWithGlobals(path string) (*Policy, error) {
+	p, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	bannedFile, err := BannedFilePath()
+	if err != nil {
+		return p, nil
+	}
+
+	bannedFuncs, err := LoadGlobalBanned(bannedFile)
+	if err != nil {
+		return nil, err
+	}
+
+	p.BannedFunctions = bannedFuncs
+	return p, nil
+}
+
 // ConfigDir returns ~/.config/autoscan.
 func ConfigDir() (string, error) {
+	if override := strings.TrimSpace(os.Getenv("AUTOSCAN_CONFIG_DIR")); override != "" {
+		return override, nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

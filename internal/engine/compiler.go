@@ -205,8 +205,11 @@ func (e *CompileEngine) resolveLibraryFiles() ([]string, string, []string) {
 		return e.cachedLibFiles, e.cachedLibDir, e.cachedLibWarn
 	}
 
-	home, _ := os.UserHomeDir()
-	libDir := filepath.Join(home, ".config", "autoscan", "libraries")
+	configDir, err := policy.ConfigDir()
+	if err != nil {
+		configDir = filepath.Join(".", ".autoscan")
+	}
+	libDir := filepath.Join(configDir, "libraries")
 
 	var libraryFiles []string
 	var warnings []string

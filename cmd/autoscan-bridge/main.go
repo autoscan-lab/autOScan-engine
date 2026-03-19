@@ -1,0 +1,306 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/felitrejos/autoscan-engine/pkg/domain"
+	"github.com/felitrejos/autoscan-engine/pkg/engine"
+	"github.com/felitrejos/autoscan-engine/pkg/policy"
+)
+
+var version = "dev"
+
+type bridgeEvent struct {
+	Type      string              `json:"type"`
+	Message   string              `json:"message,omitempty"`
+	Version   string              `json:"version,omitempty"`
+	Discovery *discoveryPayload   `json:"discovery,omitempty"`
+	Compile   *compilePayload     `json:"compile,omitempty"`
+	Scan      *scanPayload        `json:"scan,omitempty"`
+	Run       *runCompletePayload `json:"run,omitempty"`
+}
+
+type discoveryPayload struct {
+	SubmissionCount int                 `json:"submission_count"`
+	Submissions     []submissionPayload `json:"submissions"`
+}
+
+type compilePayload struct {
+	SubmissionID string `json:"submission_id"`
+	OK           bool   `json:"ok"`
+	ExitCode     int    `json:"exit_code"`
+	TimedOut     bool   `json:"timed_out"`
+	DurationMs   int64  `json:"duration_ms"`
+	Stdout       string `json:"stdout,omitempty"`
+	Stderr       string `json:"stderr,omitempty"`
+}
+
+type scanPayload struct {
+	SubmissionID string   `json:"submission_id"`
+	BannedHits   int      `json:"banned_hits"`
+	ParseErrors  []string `json:"parse_errors,omitempty"`
+}
+
+type runCompletePayload struct {
+	Summary     runSummaryPayload     `json:"summary"`
+	Submissions []runSubmissionResult `json:"submissions"`
+}
+
+type runSummaryPayload struct {
+	PolicyName            string         `json:"policy_name"`
+	Root                  string         `json:"root"`
+	StartedAt             string         `json:"started_at"`
+	FinishedAt            string         `json:"finished_at"`
+	DurationMs            int64          `json:"duration_ms"`
+	TotalSubmissions      int            `json:"total_submissions"`
+	CompilePass           int            `json:"compile_pass"`
+	CompileFail           int            `json:"compile_fail"`
+	CompileTimeout        int            `json:"compile_timeout"`
+	CleanSubmissions      int            `json:"clean_submissions"`
+	SubmissionsWithBanned int            `json:"submissions_with_banned"`
+	BannedHitsTotal       int            `json:"banned_hits_total"`
+	TopBannedFunctions    map[string]int `json:"top_banned_functions"`
+}
+
+type runSubmissionResult struct {
+	ID             string   `json:"id"`
+	Path           string   `json:"path"`
+	Status         string   `json:"status"`
+	CFiles         []string `json:"c_files"`
+	CompileOK      bool     `json:"compile_ok"`
+	CompileTimeout bool     `json:"compile_timeout"`
+	ExitCode       int      `json:"exit_code"`
+	CompileTimeMs  int64    `json:"compile_time_ms"`
+	Stderr         string   `json:"stderr,omitempty"`
+	BannedCount    int      `json:"banned_count"`
+}
+
+type submissionPayload struct {
+	ID     string   `json:"id"`
+	Path   string   `json:"path"`
+	CFiles []string `json:"c_files"`
+}
+
+type eventWriter struct {
+	mu      sync.Mutex
+	encoder *json.Encoder
+}
+
+func newEventWriter() *eventWriter {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	return &eventWriter{encoder: encoder}
+}
+
+func (w *eventWriter) emit(event bridgeEvent) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.encoder.Encode(event)
+}
+
+func main() {
+	if err := run(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	if len(os.Args) < 2 {
+		return errors.New("usage: autoscan-bridge <version|run-session|run-submission>")
+	}
+
+	writer := newEventWriter()
+
+	switch os.Args[1] {
+	case "version":
+		return writer.emit(bridgeEvent{
+			Type:    "version",
+			Version: version,
+			Message: "autoscan-bridge ready",
+		})
+	case "run-session":
+		return runCommand(writer, os.Args[2:], false)
+	case "run-submission":
+		return runCommand(writer, os.Args[2:], true)
+	default:
+		return fmt.Errorf("unknown command %q", os.Args[1])
+	}
+}
+
+func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission bool) error {
+	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+
+	workspacePath := flags.String("workspace", "", "Path to the workspace or submission root")
+	policyPath := flags.String("policy", "", "Path to the policy file")
+	configDir := flags.String("config-dir", "", "Config directory override")
+	outputDir := flags.String("output-dir", "", "Binary output directory")
+	workers := flags.Int("workers", 0, "Worker count override")
+	shortNames := flags.Bool("short-names", false, "Use short submission directory names")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if *workspacePath == "" {
+		return errors.New("missing required --workspace")
+	}
+	if *policyPath == "" {
+		return errors.New("missing required --policy")
+	}
+
+	if *configDir != "" {
+		if err := os.Setenv("AUTOSCAN_CONFIG_DIR", *configDir); err != nil {
+			return fmt.Errorf("setting AUTOSCAN_CONFIG_DIR: %w", err)
+		}
+	}
+
+	loadedPolicy, err := policy.LoadWithGlobals(*policyPath)
+	if err != nil {
+		return fmt.Errorf("loading policy: %w", err)
+	}
+
+	rootPath, err := filepath.Abs(*workspacePath)
+	if err != nil {
+		return fmt.Errorf("resolving workspace path: %w", err)
+	}
+
+	opts := []engine.CompileOption{
+		engine.WithShortNames(*shortNames),
+	}
+	if *workers > 0 {
+		opts = append(opts, engine.WithWorkers(*workers))
+	}
+	if *outputDir != "" {
+		opts = append(opts, engine.WithOutputDir(*outputDir))
+	}
+
+	runner, err := engine.NewRunner(loadedPolicy, opts...)
+	if err != nil {
+		return fmt.Errorf("creating runner: %w", err)
+	}
+	if *outputDir == "" {
+		defer runner.Cleanup()
+	}
+
+	runLabel := "workspace"
+	if treatRootAsSingleSubmission {
+		runLabel = "submission"
+	}
+
+	if err := writer.emit(bridgeEvent{
+		Type:    "started",
+		Message: fmt.Sprintf("Starting %s run for %s with %s.", runLabel, rootPath, loadedPolicy.Name),
+	}); err != nil {
+		return err
+	}
+
+	report, err := runner.Run(context.Background(), rootPath, engine.RunnerCallbacks{
+		OnDiscoveryComplete: func(submissions []domain.Submission) {
+			payload := discoveryPayload{
+				SubmissionCount: len(submissions),
+				Submissions:     make([]submissionPayload, len(submissions)),
+			}
+			for index, submission := range submissions {
+				payload.Submissions[index] = submissionPayload{
+					ID:     submission.ID,
+					Path:   submission.Path,
+					CFiles: submission.CFiles,
+				}
+			}
+			_ = writer.emit(bridgeEvent{
+				Type:      "discovery_complete",
+				Discovery: &payload,
+			})
+		},
+		OnCompileComplete: func(sub domain.Submission, result domain.CompileResult) {
+			_ = writer.emit(bridgeEvent{
+				Type: "compile_complete",
+				Compile: &compilePayload{
+					SubmissionID: sub.ID,
+					OK:           result.OK,
+					ExitCode:     result.ExitCode,
+					TimedOut:     result.TimedOut,
+					DurationMs:   result.DurationMs,
+					Stdout:       result.Stdout,
+					Stderr:       result.Stderr,
+				},
+			})
+		},
+		OnScanComplete: func(sub domain.Submission, result domain.ScanResult) {
+			_ = writer.emit(bridgeEvent{
+				Type: "scan_complete",
+				Scan: &scanPayload{
+					SubmissionID: sub.ID,
+					BannedHits:   result.TotalHits(),
+					ParseErrors:  result.ParseErrors,
+				},
+			})
+		},
+		OnAllComplete: func(report domain.RunReport) {
+			_ = writer.emit(bridgeEvent{
+				Type: "run_complete",
+				Run:  buildRunCompletePayload(report),
+			})
+		},
+	})
+	if err != nil {
+		_ = writer.emit(bridgeEvent{
+			Type:    "error",
+			Message: err.Error(),
+		})
+		return fmt.Errorf("running engine: %w", err)
+	}
+
+	if report == nil {
+		return errors.New("engine finished without a report")
+	}
+
+	return nil
+}
+
+func buildRunCompletePayload(report domain.RunReport) *runCompletePayload {
+	payload := &runCompletePayload{
+		Summary: runSummaryPayload{
+			PolicyName:            report.PolicyName,
+			Root:                  report.Root,
+			StartedAt:             report.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+			FinishedAt:            report.FinishedAt.Format("2006-01-02T15:04:05Z07:00"),
+			DurationMs:            report.Summary.DurationMs,
+			TotalSubmissions:      report.Summary.TotalSubmissions,
+			CompilePass:           report.Summary.CompilePass,
+			CompileFail:           report.Summary.CompileFail,
+			CompileTimeout:        report.Summary.CompileTimeout,
+			CleanSubmissions:      report.Summary.CleanSubmissions,
+			SubmissionsWithBanned: report.Summary.SubmissionsWithBanned,
+			BannedHitsTotal:       report.Summary.BannedHitsTotal,
+			TopBannedFunctions:    report.Summary.TopBannedFunctions,
+		},
+		Submissions: make([]runSubmissionResult, len(report.Results)),
+	}
+
+	for index, result := range report.Results {
+		payload.Submissions[index] = runSubmissionResult{
+			ID:             result.Submission.ID,
+			Path:           result.Submission.Path,
+			Status:         string(result.Status),
+			CFiles:         result.Submission.CFiles,
+			CompileOK:      result.Compile.OK,
+			CompileTimeout: result.Compile.TimedOut,
+			ExitCode:       result.Compile.ExitCode,
+			CompileTimeMs:  result.Compile.DurationMs,
+			Stderr:         result.Compile.Stderr,
+			BannedCount:    result.Scan.TotalHits(),
+		}
+	}
+
+	return payload
+}
