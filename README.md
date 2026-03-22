@@ -43,7 +43,8 @@ go build ./...
 ### Build the Studio Bridge
 
 ```bash
-make build-bridge
+mkdir -p dist
+go build -o dist/autoscan-bridge ./cmd/autoscan-bridge
 ./dist/autoscan-bridge version
 ```
 
