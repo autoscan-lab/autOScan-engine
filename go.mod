@@ -1,4 +1,4 @@
-module github.com/felitrejos/autoscan-engine
+module github.com/autoscan-lab/autoscan-engine
 
 go 1.22
 

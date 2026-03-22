@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
 func CompareFiles(fileA, fileB string, fpA, fpB domain.FileFingerprint, cfg domain.CompareConfig) domain.PlagiarismResult {

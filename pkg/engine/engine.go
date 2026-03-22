@@ -3,10 +3,10 @@ package engine
 import (
 	"context"
 
-	internalengine "github.com/felitrejos/autoscan-engine/internal/engine"
-	aipkg "github.com/felitrejos/autoscan-engine/pkg/ai"
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
-	"github.com/felitrejos/autoscan-engine/pkg/policy"
+	internalengine "github.com/autoscan-lab/autoscan-engine/internal/engine"
+	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 const (

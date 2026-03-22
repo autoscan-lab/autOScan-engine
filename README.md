@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  Core module used by autOScan clients (TUI, GUI, and automation tooling)
+  Core engine used by autOScan apps and tools
 </p>
 
 ---
@@ -27,19 +27,16 @@
 - AI-pattern detection against dictionary fingerprints
 - Policy parsing and validation helpers
 - JSON and CSV export helpers for run reports
-- Public Go facade package (`pkg/engine`) for consumer apps
+- Public Go facade package (`pkg/engine`) for autOScan apps/tools
 - `autoscan-bridge` companion CLI for GUI integrations
 
 ---
 
 ## Installation
 
-### Build from Source
+Requires: Go 1.22+, `gcc`
 
 ```bash
-git clone <your-private-repo-url>
-cd autOScan-engine
-go mod tidy
 go build ./...
 ```
 
@@ -57,15 +54,15 @@ make build-bridge
 ### As a Go Module
 
 ```bash
-go get github.com/felitrejos/autoscan-engine@latest
+go get github.com/autoscan-lab/autoscan-engine@latest
 ```
 
 ```go
 import (
   "context"
 
-  engine "github.com/felitrejos/autoscan-engine/pkg/engine"
-  "github.com/felitrejos/autoscan-engine/pkg/policy"
+  engine "github.com/autoscan-lab/autoscan-engine/pkg/engine"
+  "github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 p, _ := policy.Load("/path/to/policy.yaml")
@@ -124,10 +121,3 @@ Engine runtime behavior is compatible with:
 
 Set `AUTOSCAN_CONFIG_DIR` to override the default config location when embedding
 the engine or using the bridge from another app.
-
----
-
-## Docs
-
-- `docs/ARCHITECTURE.md`
-- `docs/PRODUCT_SCOPE.md`

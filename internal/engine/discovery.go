@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
-	"github.com/felitrejos/autoscan-engine/pkg/policy"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 type DiscoveryEngine struct {

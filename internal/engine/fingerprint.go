@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/c"
 )

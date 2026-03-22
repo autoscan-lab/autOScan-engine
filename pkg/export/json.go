@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
 type JSONReport struct {

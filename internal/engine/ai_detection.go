@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	aipkg "github.com/felitrejos/autoscan-engine/pkg/ai"
-	"github.com/felitrejos/autoscan-engine/pkg/domain"
+	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
 type dictionaryFingerprint struct {
