@@ -122,3 +122,9 @@ Engine runtime behavior is compatible with:
 
 Set `AUTOSCAN_CONFIG_DIR` to override the default config location when embedding
 the engine or using the bridge from another app.
+
+---
+
+## License
+
+MIT
