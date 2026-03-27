@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	internalengine "github.com/autoscan-lab/autoscan-engine/internal/engine"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
@@ -18,13 +19,16 @@ import (
 var version = "dev"
 
 type bridgeEvent struct {
-	Type      string              `json:"type"`
-	Message   string              `json:"message,omitempty"`
-	Version   string              `json:"version,omitempty"`
-	Discovery *discoveryPayload   `json:"discovery,omitempty"`
-	Compile   *compilePayload     `json:"compile,omitempty"`
-	Scan      *scanPayload        `json:"scan,omitempty"`
-	Run       *runCompletePayload `json:"run,omitempty"`
+	Type            string                   `json:"type"`
+	Message         string                   `json:"message,omitempty"`
+	Version         string                   `json:"version,omitempty"`
+	Discovery       *discoveryPayload        `json:"discovery,omitempty"`
+	Compile         *compilePayload          `json:"compile,omitempty"`
+	Scan            *scanPayload             `json:"scan,omitempty"`
+	Run             *runCompletePayload      `json:"run,omitempty"`
+	TestCaseStarted *testCaseStartedPayload  `json:"test_case_started,omitempty"`
+	TestCase        *testCaseCompletePayload `json:"test_case,omitempty"`
+	TestsComplete   *testsCompletePayload    `json:"tests_complete,omitempty"`
 }
 
 type discoveryPayload struct {
@@ -88,6 +92,51 @@ type submissionPayload struct {
 	CFiles []string `json:"c_files"`
 }
 
+type capabilitiesPayload struct {
+	RunSession        bool `json:"run_session"`
+	RunSubmission     bool `json:"run_submission"`
+	RunTestCase       bool `json:"run_test_case"`
+	RunAllPolicyTests bool `json:"run_all_policy_tests"`
+	DiffPayload       bool `json:"diff_payload"`
+}
+
+type testCaseStartedPayload struct {
+	SubmissionID  string `json:"submission_id"`
+	TestCaseIndex int    `json:"test_case_index"`
+	TestCaseName  string `json:"test_case_name"`
+}
+
+type diffLinePayload struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+	LineNum int    `json:"line_num,omitempty"`
+}
+
+type testCaseCompletePayload struct {
+	SubmissionID   string            `json:"submission_id"`
+	TestCaseIndex  int               `json:"test_case_index"`
+	TestCaseName   string            `json:"test_case_name"`
+	Status         string            `json:"status"`
+	ExitCode       int               `json:"exit_code"`
+	DurationMs     int64             `json:"duration_ms"`
+	Stdout         string            `json:"stdout,omitempty"`
+	Stderr         string            `json:"stderr,omitempty"`
+	OutputMatch    string            `json:"output_match,omitempty"`
+	ExpectedOutput *string           `json:"expected_output,omitempty"`
+	ActualOutput   *string           `json:"actual_output,omitempty"`
+	DiffLines      []diffLinePayload `json:"diff_lines,omitempty"`
+	Message        string            `json:"message,omitempty"`
+}
+
+type testsCompletePayload struct {
+	SubmissionID        string `json:"submission_id"`
+	Total               int    `json:"total"`
+	Passed              int    `json:"passed"`
+	Failed              int    `json:"failed"`
+	CompileFailed       int    `json:"compile_failed"`
+	MissingExpectedFile int    `json:"missing_expected_output"`
+}
+
 type eventWriter struct {
 	mu      sync.Mutex
 	encoder *json.Encoder
@@ -113,11 +162,14 @@ func main() {
 }
 
 func run() error {
-	if len(os.Args) < 2 {
-		return errors.New("usage: autoscan-bridge <version|run-session|run-submission>")
-	}
-
 	writer := newEventWriter()
+
+	if len(os.Args) < 2 {
+		return emitCommandError(
+			writer,
+			errors.New("usage: autoscan-bridge <version|capabilities|run-session|run-submission|run-test-case|run-all-tests>"),
+		)
+	}
 
 	switch os.Args[1] {
 	case "version":
@@ -126,13 +178,44 @@ func run() error {
 			Version: version,
 			Message: "autoscan-bridge ready",
 		})
+	case "capabilities":
+		return emitCapabilities()
 	case "run-session":
 		return runCommand(writer, os.Args[2:], false)
 	case "run-submission":
 		return runCommand(writer, os.Args[2:], true)
+	case "run-test-case":
+		return runTestCaseCommand(writer, os.Args[2:])
+	case "run-all-tests":
+		return runAllTestsCommand(writer, os.Args[2:])
 	default:
-		return fmt.Errorf("unknown command %q", os.Args[1])
+		return emitCommandError(writer, fmt.Errorf("unknown command %q", os.Args[1]))
 	}
+}
+
+func emitCommandError(writer *eventWriter, err error) error {
+	if err == nil {
+		return nil
+	}
+	if writer != nil {
+		_ = writer.emit(bridgeEvent{
+			Type:    "error",
+			Message: err.Error(),
+		})
+	}
+	return err
+}
+
+func emitCapabilities() error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(capabilitiesPayload{
+		RunSession:        true,
+		RunSubmission:     true,
+		RunTestCase:       true,
+		RunAllPolicyTests: true,
+		DiffPayload:       true,
+	})
 }
 
 func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission bool) error {
@@ -147,14 +230,14 @@ func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission 
 	shortNames := flags.Bool("short-names", false, "Use short submission directory names")
 
 	if err := flags.Parse(args); err != nil {
-		return err
+		return emitCommandError(writer, err)
 	}
 
 	if *workspacePath == "" {
-		return errors.New("missing required --workspace")
+		return emitCommandError(writer, errors.New("missing required --workspace"))
 	}
 	if *policyPath == "" {
-		return errors.New("missing required --policy")
+		return emitCommandError(writer, errors.New("missing required --policy"))
 	}
 
 	if *configDir != "" {
@@ -265,6 +348,308 @@ func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission 
 	}
 
 	return nil
+}
+
+func runTestCaseCommand(writer *eventWriter, args []string) error {
+	return runTestsCommand(writer, args, true)
+}
+
+func runAllTestsCommand(writer *eventWriter, args []string) error {
+	return runTestsCommand(writer, args, false)
+}
+
+func runTestsCommand(writer *eventWriter, args []string, singleCase bool) error {
+	flags := flag.NewFlagSet("run-tests", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+
+	workspacePath := flags.String("workspace", "", "Path to the workspace root")
+	policyPath := flags.String("policy", "", "Path to the policy file")
+	submissionID := flags.String("submission-id", "", "Submission ID from discovery")
+	testCaseIndex := flags.Int("test-case-index", -1, "Test case index (0-based)")
+	configDir := flags.String("config-dir", "", "Config directory override")
+	outputDir := flags.String("output-dir", "", "Binary output directory")
+	workers := flags.Int("workers", 0, "Worker count override")
+	shortNames := flags.Bool("short-names", false, "Use short submission directory names")
+
+	if err := flags.Parse(args); err != nil {
+		return emitCommandError(writer, err)
+	}
+
+	if *workspacePath == "" {
+		return emitCommandError(writer, errors.New("missing required --workspace"))
+	}
+	if *policyPath == "" {
+		return emitCommandError(writer, errors.New("missing required --policy"))
+	}
+	if *submissionID == "" {
+		return emitCommandError(writer, errors.New("missing required --submission-id"))
+	}
+	if singleCase && *testCaseIndex < 0 {
+		return emitCommandError(writer, errors.New("missing required --test-case-index"))
+	}
+
+	if *configDir != "" {
+		if err := os.Setenv("AUTOSCAN_CONFIG_DIR", *configDir); err != nil {
+			return fmt.Errorf("setting AUTOSCAN_CONFIG_DIR: %w", err)
+		}
+	}
+
+	loadedPolicy, err := policy.LoadWithGlobals(*policyPath)
+	if err != nil {
+		return fmt.Errorf("loading policy: %w", err)
+	}
+
+	rootPath, err := filepath.Abs(*workspacePath)
+	if err != nil {
+		return fmt.Errorf("resolving workspace path: %w", err)
+	}
+
+	runLabel := "all tests"
+	if singleCase {
+		runLabel = fmt.Sprintf("test case #%d", *testCaseIndex)
+	}
+	if err := writer.emit(bridgeEvent{
+		Type:    "started",
+		Message: fmt.Sprintf("Starting %s for submission %s.", runLabel, *submissionID),
+	}); err != nil {
+		return err
+	}
+
+	discovery := internalengine.NewDiscoveryEngine(loadedPolicy)
+	submissions, err := discovery.Discover(rootPath)
+	if err != nil {
+		_ = writer.emit(bridgeEvent{Type: "error", Message: err.Error()})
+		return fmt.Errorf("discovering submissions: %w", err)
+	}
+
+	discoveryData := discoveryPayload{
+		SubmissionCount: len(submissions),
+		Submissions:     make([]submissionPayload, len(submissions)),
+	}
+	for index, submission := range submissions {
+		discoveryData.Submissions[index] = submissionPayload{
+			ID:     submission.ID,
+			Path:   submission.Path,
+			CFiles: submission.CFiles,
+		}
+	}
+	_ = writer.emit(bridgeEvent{Type: "discovery_complete", Discovery: &discoveryData})
+
+	target, found := findSubmissionByID(submissions, *submissionID)
+	if !found {
+		msg := fmt.Sprintf("submission not found: %s", *submissionID)
+		_ = writer.emit(bridgeEvent{Type: "error", Message: msg})
+		return errors.New(msg)
+	}
+
+	activeOutputDir := *outputDir
+	cleanupOutputDir := ""
+	if activeOutputDir == "" {
+		tempDir, err := os.MkdirTemp("", "autoscan-tests-*")
+		if err != nil {
+			_ = writer.emit(bridgeEvent{Type: "error", Message: err.Error()})
+			return fmt.Errorf("creating temporary output directory: %w", err)
+		}
+		activeOutputDir = tempDir
+		cleanupOutputDir = tempDir
+	}
+	if cleanupOutputDir != "" {
+		defer os.RemoveAll(cleanupOutputDir)
+	}
+
+	compileOpts := []internalengine.CompileOption{
+		internalengine.WithShortNames(*shortNames),
+		internalengine.WithOutputDir(activeOutputDir),
+	}
+	if *workers > 0 {
+		compileOpts = append(compileOpts, internalengine.WithWorkers(*workers))
+	}
+
+	compiler, err := internalengine.NewCompileEngine(loadedPolicy, compileOpts...)
+	if err != nil {
+		_ = writer.emit(bridgeEvent{Type: "error", Message: err.Error()})
+		return fmt.Errorf("creating compile engine: %w", err)
+	}
+	defer compiler.Cleanup()
+
+	compiled := compiler.CompileAll(context.Background(), []domain.Submission{target}, nil)
+	compileResult := compiled[0]
+	_ = writer.emit(bridgeEvent{
+		Type: "compile_complete",
+		Compile: &compilePayload{
+			SubmissionID: target.ID,
+			OK:           compileResult.OK,
+			ExitCode:     compileResult.ExitCode,
+			TimedOut:     compileResult.TimedOut,
+			DurationMs:   compileResult.DurationMs,
+			Stdout:       compileResult.Stdout,
+			Stderr:       compileResult.Stderr,
+		},
+	})
+
+	testCases := loadedPolicy.Run.TestCases
+	if len(testCases) == 0 {
+		_ = writer.emit(bridgeEvent{
+			Type: "tests_complete",
+			TestsComplete: &testsCompletePayload{
+				SubmissionID:        target.ID,
+				Total:               0,
+				Passed:              0,
+				Failed:              0,
+				CompileFailed:       0,
+				MissingExpectedFile: 0,
+			},
+		})
+		return nil
+	}
+
+	if singleCase && (*testCaseIndex < 0 || *testCaseIndex >= len(testCases)) {
+		msg := fmt.Sprintf("invalid --test-case-index: %d (have %d test cases)", *testCaseIndex, len(testCases))
+		_ = writer.emit(bridgeEvent{Type: "error", Message: msg})
+		return errors.New(msg)
+	}
+
+	indices := make([]int, 0, len(testCases))
+	if singleCase {
+		indices = append(indices, *testCaseIndex)
+	} else {
+		for i := range testCases {
+			indices = append(indices, i)
+		}
+	}
+
+	summary := testsCompletePayload{SubmissionID: target.ID, Total: len(indices)}
+	if compileResult.TimedOut || !compileResult.OK {
+		summary.CompileFailed = len(indices)
+		for _, index := range indices {
+			tc := testCases[index]
+			_ = writer.emit(bridgeEvent{
+				Type: "test_case_complete",
+				TestCase: &testCaseCompletePayload{
+					SubmissionID:  target.ID,
+					TestCaseIndex: index,
+					TestCaseName:  tc.Name,
+					Status:        "compile_failed",
+					ExitCode:      compileResult.ExitCode,
+					DurationMs:    0,
+					Message:       "Compilation failed; test was not executed.",
+				},
+			})
+		}
+		_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
+		return nil
+	}
+
+	executor := internalengine.NewExecutorWithOptions(loadedPolicy, activeOutputDir, *shortNames)
+	for _, index := range indices {
+		tc := testCases[index]
+		_ = writer.emit(bridgeEvent{
+			Type: "test_case_started",
+			TestCaseStarted: &testCaseStartedPayload{
+				SubmissionID:  target.ID,
+				TestCaseIndex: index,
+				TestCaseName:  tc.Name,
+			},
+		})
+
+		result := executor.ExecuteTestCase(context.Background(), target, tc)
+		payload, missingExpected := buildTestCaseCompletePayload(target, index, tc, result)
+		if missingExpected {
+			summary.MissingExpectedFile++
+		}
+
+		switch payload.Status {
+		case "pass":
+			summary.Passed++
+		case "compile_failed":
+			summary.CompileFailed++
+		default:
+			summary.Failed++
+		}
+
+		_ = writer.emit(bridgeEvent{Type: "test_case_complete", TestCase: payload})
+	}
+
+	_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
+	return nil
+}
+
+func buildTestCaseCompletePayload(
+	submission domain.Submission,
+	index int,
+	tc policy.TestCase,
+	result domain.ExecuteResult,
+) (*testCaseCompletePayload, bool) {
+	status := "pass"
+	if result.TimedOut {
+		status = "timeout"
+	} else if !result.Passed {
+		status = "fail"
+	}
+
+	actualOutput := result.Stdout
+	payload := &testCaseCompletePayload{
+		SubmissionID:  submission.ID,
+		TestCaseIndex: index,
+		TestCaseName:  tc.Name,
+		Status:        status,
+		ExitCode:      result.ExitCode,
+		DurationMs:    result.Duration.Milliseconds(),
+		Stdout:        result.Stdout,
+		Stderr:        result.Stderr,
+		OutputMatch:   string(result.OutputMatch),
+		ActualOutput:  &actualOutput,
+	}
+
+	expectedOutput, expectedAvailable := loadExpectedOutput(tc)
+	if expectedAvailable {
+		payload.ExpectedOutput = &expectedOutput
+	}
+
+	if len(result.OutputDiff) > 0 {
+		payload.DiffLines = make([]diffLinePayload, len(result.OutputDiff))
+		for i, line := range result.OutputDiff {
+			payload.DiffLines[i] = diffLinePayload{
+				Type:    line.Type,
+				Content: line.Content,
+				LineNum: line.LineNum,
+			}
+		}
+	}
+
+	if result.OutputMatch == domain.OutputMatchMissing {
+		payload.Message = "Expected output file was not found."
+	}
+
+	return payload, result.OutputMatch == domain.OutputMatchMissing
+}
+
+func loadExpectedOutput(tc policy.TestCase) (string, bool) {
+	if tc.ExpectedOutputFile == "" {
+		return "", false
+	}
+
+	configDir, err := policy.ConfigDir()
+	if err != nil {
+		return "", false
+	}
+
+	expectedPath := filepath.Join(configDir, "expected_outputs", tc.ExpectedOutputFile)
+	data, err := os.ReadFile(expectedPath)
+	if err != nil {
+		return "", false
+	}
+
+	return string(data), true
+}
+
+func findSubmissionByID(submissions []domain.Submission, submissionID string) (domain.Submission, bool) {
+	for _, submission := range submissions {
+		if submission.ID == submissionID {
+			return submission, true
+		}
+	}
+	return domain.Submission{}, false
 }
 
 func buildRunCompletePayload(report domain.RunReport) *runCompletePayload {

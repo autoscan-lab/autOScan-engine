@@ -43,9 +43,8 @@ go build ./...
 ### Build the Studio Bridge
 
 ```bash
-mkdir -p dist
-go build -o dist/autoscan-bridge ./cmd/autoscan-bridge
-./dist/autoscan-bridge version
+go build -o ./autoscan-bridge ./cmd/autoscan-bridge
+./autoscan-bridge version
 ```
 
 ---
@@ -77,10 +76,45 @@ _ = report
 The bridge is intended for apps such as `autOScan Studio` that need a stable
 process boundary into the engine.
 
+Check capability flags:
+
 ```bash
-./dist/autoscan-bridge run-session \
+./autoscan-bridge capabilities
+```
+
+Run a full workspace session (compile + scan):
+
+```bash
+./autoscan-bridge run-session \
   --workspace /path/to/submissions \
   --policy /path/to/policy.yaml
+```
+
+Run one discovered submission as a workspace root (compile + scan):
+
+```bash
+./autoscan-bridge run-submission \
+  --workspace /path/to/submission \
+  --policy /path/to/policy.yaml
+```
+
+Run one policy test case for one submission:
+
+```bash
+./autoscan-bridge run-test-case \
+  --workspace /path/to/submissions \
+  --policy /path/to/policy.yaml \
+  --submission-id "submission-id-from-discovery" \
+  --test-case-index 0
+```
+
+Run all policy test cases for one submission:
+
+```bash
+./autoscan-bridge run-all-tests \
+  --workspace /path/to/submissions \
+  --policy /path/to/policy.yaml \
+  --submission-id "submission-id-from-discovery"
 ```
 
 The bridge writes newline-delimited JSON events to stdout:
@@ -89,8 +123,19 @@ The bridge writes newline-delimited JSON events to stdout:
 - `discovery_complete`
 - `compile_complete`
 - `scan_complete`
+- `test_case_started`
+- `test_case_complete`
+- `tests_complete`
 - `run_complete`
 - `error`
+
+`capabilities` returns a machine-readable JSON object with:
+
+- `run_session`
+- `run_submission`
+- `run_test_case`
+- `run_all_policy_tests`
+- `diff_payload`
 
 ---
 
