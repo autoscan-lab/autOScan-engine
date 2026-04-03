@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-and-release:
     runs-on: macos-14
+    env:
+      AUTOSCAN_BOT_PAT: ${{ secrets.AUTOSCAN_BOT_PAT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,23 +46,23 @@ jobs:
           prerelease: false
 
       - name: Dispatch engine release to autOScan Studio
-        if: ${{ secrets.AUTOSCAN_BOT_PAT != '' }}
+        if: ${{ env.AUTOSCAN_BOT_PAT != '' }}
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.AUTOSCAN_BOT_PAT }}
+          token: ${{ env.AUTOSCAN_BOT_PAT }}
           repository: autoscan-lab/autOScan-studio
           event-type: engine_release
           client-payload: '{"engine_tag":"${{ github.ref_name }}"}'
 
       - name: Dispatch engine release to autOScan (TUI)
-        if: ${{ secrets.AUTOSCAN_BOT_PAT != '' }}
+        if: ${{ env.AUTOSCAN_BOT_PAT != '' }}
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.AUTOSCAN_BOT_PAT }}
+          token: ${{ env.AUTOSCAN_BOT_PAT }}
           repository: autoscan-lab/autOScan
           event-type: engine_release
           client-payload: '{"engine_tag":"${{ github.ref_name }}"}'
 
       - name: Downstream dispatch not configured
-        if: ${{ secrets.AUTOSCAN_BOT_PAT == '' }}
+        if: ${{ env.AUTOSCAN_BOT_PAT == '' }}
         run: echo "::warning::AUTOSCAN_BOT_PAT is not set; skipping downstream bump PR dispatch."
