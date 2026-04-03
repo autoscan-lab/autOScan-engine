@@ -1,0 +1,66 @@
+name: Release Bridge
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build autoscan-bridge (darwin/arm64)
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -o ./autoscan-bridge ./cmd/autoscan-bridge
+
+      - name: Verify binary
+        run: ./autoscan-bridge version
+
+      - name: Generate checksum
+        run: shasum -a 256 ./autoscan-bridge > ./autoscan-bridge.sha256
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            autoscan-bridge
+            autoscan-bridge.sha256
+          draft: false
+          prerelease: false
+
+      - name: Dispatch engine release to autOScan Studio
+        if: ${{ secrets.AUTOSCAN_BOT_PAT != '' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.AUTOSCAN_BOT_PAT }}
+          repository: autoscan-lab/autOScan-studio
+          event-type: engine_release
+          client-payload: '{"engine_tag":"${{ github.ref_name }}"}'
+
+      - name: Dispatch engine release to autOScan (TUI)
+        if: ${{ secrets.AUTOSCAN_BOT_PAT != '' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.AUTOSCAN_BOT_PAT }}
+          repository: autoscan-lab/autOScan
+          event-type: engine_release
+          client-payload: '{"engine_tag":"${{ github.ref_name }}"}'
+
+      - name: Downstream dispatch not configured
+        if: ${{ secrets.AUTOSCAN_BOT_PAT == '' }}
+        run: echo "::warning::AUTOSCAN_BOT_PAT is not set; skipping downstream bump PR dispatch."
