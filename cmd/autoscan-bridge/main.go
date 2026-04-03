@@ -74,16 +74,17 @@ type runSummaryPayload struct {
 }
 
 type runSubmissionResult struct {
-	ID             string   `json:"id"`
-	Path           string   `json:"path"`
-	Status         string   `json:"status"`
-	CFiles         []string `json:"c_files"`
-	CompileOK      bool     `json:"compile_ok"`
-	CompileTimeout bool     `json:"compile_timeout"`
-	ExitCode       int      `json:"exit_code"`
-	CompileTimeMs  int64    `json:"compile_time_ms"`
-	Stderr         string   `json:"stderr,omitempty"`
-	BannedCount    int      `json:"banned_count"`
+	ID             string             `json:"id"`
+	Path           string             `json:"path"`
+	Status         string             `json:"status"`
+	CFiles         []string           `json:"c_files"`
+	CompileOK      bool               `json:"compile_ok"`
+	CompileTimeout bool               `json:"compile_timeout"`
+	ExitCode       int                `json:"exit_code"`
+	CompileTimeMs  int64              `json:"compile_time_ms"`
+	Stderr         string             `json:"stderr,omitempty"`
+	BannedCount    int                `json:"banned_count"`
+	BannedHits     []bannedHitPayload `json:"banned_hits,omitempty"`
 }
 
 type submissionPayload struct {
@@ -93,11 +94,17 @@ type submissionPayload struct {
 }
 
 type capabilitiesPayload struct {
-	RunSession        bool `json:"run_session"`
-	RunSubmission     bool `json:"run_submission"`
-	RunTestCase       bool `json:"run_test_case"`
-	RunAllPolicyTests bool `json:"run_all_policy_tests"`
-	DiffPayload       bool `json:"diff_payload"`
+	RunSession  bool `json:"run_session"`
+	RunTestCase bool `json:"run_test_case"`
+	DiffPayload bool `json:"diff_payload"`
+}
+
+type bannedHitPayload struct {
+	Function string `json:"function"`
+	File     string `json:"file"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Snippet  string `json:"snippet,omitempty"`
 }
 
 type testCaseStartedPayload struct {
@@ -167,7 +174,7 @@ func run() error {
 	if len(os.Args) < 2 {
 		return emitCommandError(
 			writer,
-			errors.New("usage: autoscan-bridge <version|capabilities|run-session|run-submission|run-test-case|run-all-tests>"),
+			errors.New("usage: autoscan-bridge <version|capabilities|run-session|run-test-case>"),
 		)
 	}
 
@@ -181,13 +188,9 @@ func run() error {
 	case "capabilities":
 		return emitCapabilities()
 	case "run-session":
-		return runCommand(writer, os.Args[2:], false)
-	case "run-submission":
-		return runCommand(writer, os.Args[2:], true)
+		return runCommand(writer, os.Args[2:])
 	case "run-test-case":
 		return runTestCaseCommand(writer, os.Args[2:])
-	case "run-all-tests":
-		return runAllTestsCommand(writer, os.Args[2:])
 	default:
 		return emitCommandError(writer, fmt.Errorf("unknown command %q", os.Args[1]))
 	}
@@ -210,15 +213,13 @@ func emitCapabilities() error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(capabilitiesPayload{
-		RunSession:        true,
-		RunSubmission:     true,
-		RunTestCase:       true,
-		RunAllPolicyTests: true,
-		DiffPayload:       true,
+		RunSession:  true,
+		RunTestCase: true,
+		DiffPayload: true,
 	})
 }
 
-func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission bool) error {
+func runCommand(writer *eventWriter, args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
@@ -274,14 +275,9 @@ func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission 
 		defer runner.Cleanup()
 	}
 
-	runLabel := "workspace"
-	if treatRootAsSingleSubmission {
-		runLabel = "submission"
-	}
-
 	if err := writer.emit(bridgeEvent{
 		Type:    "started",
-		Message: fmt.Sprintf("Starting %s run for %s with %s.", runLabel, rootPath, loadedPolicy.Name),
+		Message: fmt.Sprintf("Starting workspace run for %s with %s.", rootPath, loadedPolicy.Name),
 	}); err != nil {
 		return err
 	}
@@ -351,14 +347,6 @@ func runCommand(writer *eventWriter, args []string, treatRootAsSingleSubmission 
 }
 
 func runTestCaseCommand(writer *eventWriter, args []string) error {
-	return runTestsCommand(writer, args, true)
-}
-
-func runAllTestsCommand(writer *eventWriter, args []string) error {
-	return runTestsCommand(writer, args, false)
-}
-
-func runTestsCommand(writer *eventWriter, args []string, singleCase bool) error {
 	flags := flag.NewFlagSet("run-tests", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
@@ -384,7 +372,7 @@ func runTestsCommand(writer *eventWriter, args []string, singleCase bool) error 
 	if *submissionID == "" {
 		return emitCommandError(writer, errors.New("missing required --submission-id"))
 	}
-	if singleCase && *testCaseIndex < 0 {
+	if *testCaseIndex < 0 {
 		return emitCommandError(writer, errors.New("missing required --test-case-index"))
 	}
 
@@ -404,13 +392,9 @@ func runTestsCommand(writer *eventWriter, args []string, singleCase bool) error 
 		return fmt.Errorf("resolving workspace path: %w", err)
 	}
 
-	runLabel := "all tests"
-	if singleCase {
-		runLabel = fmt.Sprintf("test case #%d", *testCaseIndex)
-	}
 	if err := writer.emit(bridgeEvent{
 		Type:    "started",
-		Message: fmt.Sprintf("Starting %s for submission %s.", runLabel, *submissionID),
+		Message: fmt.Sprintf("Starting test case #%d for submission %s.", *testCaseIndex, *submissionID),
 	}); err != nil {
 		return err
 	}
@@ -503,73 +487,59 @@ func runTestsCommand(writer *eventWriter, args []string, singleCase bool) error 
 		return nil
 	}
 
-	if singleCase && (*testCaseIndex < 0 || *testCaseIndex >= len(testCases)) {
+	if *testCaseIndex >= len(testCases) {
 		msg := fmt.Sprintf("invalid --test-case-index: %d (have %d test cases)", *testCaseIndex, len(testCases))
 		_ = writer.emit(bridgeEvent{Type: "error", Message: msg})
 		return errors.New(msg)
 	}
 
-	indices := make([]int, 0, len(testCases))
-	if singleCase {
-		indices = append(indices, *testCaseIndex)
-	} else {
-		for i := range testCases {
-			indices = append(indices, i)
-		}
-	}
+	summary := testsCompletePayload{SubmissionID: target.ID, Total: 1}
+	tc := testCases[*testCaseIndex]
 
-	summary := testsCompletePayload{SubmissionID: target.ID, Total: len(indices)}
 	if compileResult.TimedOut || !compileResult.OK {
-		summary.CompileFailed = len(indices)
-		for _, index := range indices {
-			tc := testCases[index]
-			_ = writer.emit(bridgeEvent{
-				Type: "test_case_complete",
-				TestCase: &testCaseCompletePayload{
-					SubmissionID:  target.ID,
-					TestCaseIndex: index,
-					TestCaseName:  tc.Name,
-					Status:        "compile_failed",
-					ExitCode:      compileResult.ExitCode,
-					DurationMs:    0,
-					Message:       "Compilation failed; test was not executed.",
-				},
-			})
-		}
+		summary.CompileFailed = 1
+		_ = writer.emit(bridgeEvent{
+			Type: "test_case_complete",
+			TestCase: &testCaseCompletePayload{
+				SubmissionID:  target.ID,
+				TestCaseIndex: *testCaseIndex,
+				TestCaseName:  tc.Name,
+				Status:        "compile_failed",
+				ExitCode:      compileResult.ExitCode,
+				DurationMs:    0,
+				Message:       "Compilation failed; test was not executed.",
+			},
+		})
 		_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
 		return nil
 	}
 
 	executor := internalengine.NewExecutorWithOptions(loadedPolicy, activeOutputDir, *shortNames)
-	for _, index := range indices {
-		tc := testCases[index]
-		_ = writer.emit(bridgeEvent{
-			Type: "test_case_started",
-			TestCaseStarted: &testCaseStartedPayload{
-				SubmissionID:  target.ID,
-				TestCaseIndex: index,
-				TestCaseName:  tc.Name,
-			},
-		})
 
-		result := executor.ExecuteTestCase(context.Background(), target, tc)
-		payload, missingExpected := buildTestCaseCompletePayload(target, index, tc, result)
-		if missingExpected {
-			summary.MissingExpectedFile++
-		}
+	_ = writer.emit(bridgeEvent{
+		Type: "test_case_started",
+		TestCaseStarted: &testCaseStartedPayload{
+			SubmissionID:  target.ID,
+			TestCaseIndex: *testCaseIndex,
+			TestCaseName:  tc.Name,
+		},
+	})
 
-		switch payload.Status {
-		case "pass":
-			summary.Passed++
-		case "compile_failed":
-			summary.CompileFailed++
-		default:
-			summary.Failed++
-		}
-
-		_ = writer.emit(bridgeEvent{Type: "test_case_complete", TestCase: payload})
+	result := executor.ExecuteTestCase(context.Background(), target, tc)
+	payload, missingExpected := buildTestCaseCompletePayload(target, *testCaseIndex, tc, result)
+	if missingExpected {
+		summary.MissingExpectedFile++
 	}
 
+	if payload.Status == "pass" {
+		summary.Passed = 1
+	} else if payload.Status == "compile_failed" {
+		summary.CompileFailed = 1
+	} else {
+		summary.Failed = 1
+	}
+
+	_ = writer.emit(bridgeEvent{Type: "test_case_complete", TestCase: payload})
 	_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
 	return nil
 }
@@ -684,6 +654,17 @@ func buildRunCompletePayload(report domain.RunReport) *runCompletePayload {
 			CompileTimeMs:  result.Compile.DurationMs,
 			Stderr:         result.Compile.Stderr,
 			BannedCount:    result.Scan.TotalHits(),
+			BannedHits:     make([]bannedHitPayload, len(result.Scan.Hits)),
+		}
+
+		for hitIndex, hit := range result.Scan.Hits {
+			payload.Submissions[index].BannedHits[hitIndex] = bannedHitPayload{
+				Function: hit.Function,
+				File:     hit.File,
+				Line:     hit.Line,
+				Column:   hit.Column,
+				Snippet:  hit.Snippet,
+			}
 		}
 	}
 
