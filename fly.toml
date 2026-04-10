@@ -1,0 +1,28 @@
+app = "autoscan-engine-service"
+primary_region = "mad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 10
+    hard_limit = 20
+
+[[mounts]]
+  source = "autoscan_engine_data"
+  destination = "/data"
+  processes = ["app"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"

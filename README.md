@@ -11,10 +11,16 @@
 </p>
 
 <p align="center">
-  Core engine used by autOScan apps and tools
+  Core engine and cloud grading service used by autOScan apps and tools
 </p>
 
 ---
+
+## Cloud Service
+
+This repo also ships the private cloud grading service used by the WhatsApp
+agent. For service setup, deployment, environment variables, and HTTP API
+details, see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 
 ## Features
 
@@ -47,8 +53,6 @@ go build -o ./autoscan-bridge ./cmd/autoscan-bridge
 ./autoscan-bridge version
 ```
 
----
-
 ## Usage
 
 ### As a Go Module
@@ -73,8 +77,9 @@ _ = report
 
 ### As a Companion CLI
 
-The bridge is intended for apps such as `autOScan Studio` that need a stable
-process boundary into the engine.
+The bridge is intended for apps and services that need a stable process
+boundary into the engine, including `autOScan Studio`, the cloud grading
+service, and other third-party integrations.
 
 Check capability flags:
 
@@ -118,8 +123,6 @@ The bridge writes newline-delimited JSON events to stdout:
 - `run_test_case`
 - `diff_payload`
 
----
-
 ## Package Layout
 
 ```text
@@ -148,6 +151,9 @@ Engine runtime behavior is compatible with:
 
 Set `AUTOSCAN_CONFIG_DIR` to override the default config location when embedding
 the engine or using the bridge from another app.
+
+For HTTP service setup, required environment variables, and Fly deployment,
+see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 
 ---
 
