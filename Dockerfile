@@ -16,7 +16,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc make \
+    && apt-get install -y --no-install-recommends gcc make libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY service/requirements.txt ./service/requirements.txt
