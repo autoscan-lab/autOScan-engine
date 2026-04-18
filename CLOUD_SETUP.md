@@ -1,90 +1,38 @@
-# Cloud Setup
+# Deploy autOScan-engine
 
-## Overview
+## 1. R2 bucket layout
 
-The cloud service wraps `autoscan-bridge` with a FastAPI app and is intended to
-run privately on Fly.io with assignment configs stored in Cloudflare R2.
-
-Main files:
-
-- `Dockerfile`
-- `fly.toml`
-- `service/main.py`
-- `service/bridge.py`
-- `service/storage.py`
-- `service/config.py`
-- `.env.example`
-
-## Environment
-
-Required variables:
-
-- `R2_ACCOUNT_ID`
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_BUCKET_NAME`
-
-The service uses:
-
-- `/data` as its runtime directory
-- `/data/current` as the active assignment config
-- `autoscan-bridge` as the subprocess binary
-
-## Assignment Layout in R2
-
-Expected object layout:
-
-```text
-assignments/
-  lab1/
-    policy.yml
-    banned.yaml                # optional
-    libraries/                 # optional
-    test_files/                # optional
-    expected_outputs/          # optional
+```
+autoscan-assignments/
+  banned.yaml
+  assignments/
+    S0/
+      policy.yml
+    S1/
+      policy.yml
 ```
 
-## Local Run
+## 2. Create .env
+
+```
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+R2_BUCKET_NAME=autoscan-assignments
+```
+
+## 3. Deploy
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r service/requirements.txt
-uvicorn service.main:app --reload --port 8080
+# One-time: provisions the persistent disk declared in fly.toml
+fly volumes create autoscan_engine_data --region ams --size 1
+
+fly secrets import < .env
+fly deploy
 ```
 
-## HTTP Endpoints
+## Endpoints
 
-- `GET /health`
-- `POST /setup/{assignment}`
-- `POST /grade`
-
-Examples:
-
-```bash
-curl http://localhost:8080/health
-```
-
-```bash
-curl -X POST http://localhost:8080/setup/lab1
-```
-
-```bash
-curl -X POST http://localhost:8080/grade \
-  -F "file=@submissions.zip"
-```
-
-## Fly.io
-
-The included `fly.toml` is configured for:
-
-- private service on port `8080`
-- mounted volume at `/data`
-- `mad` primary region
-- auto-start / auto-stop enabled
-
-Intended private URL pattern:
-
-```text
-http://autoscan-engine-service.flycast:8080
-```
+- `GET  /health`
+- `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/S0`)
+- `POST /grade` — accepts a zip, returns JSON results

@@ -14,3 +14,7 @@ dist/
 # Python
 __pycache__/
 *.py[cod]
+
+# Environment
+.env
+.env.local

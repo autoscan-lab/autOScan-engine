@@ -31,6 +31,9 @@ def setup_assignment(assignment: str) -> dict[str, str | int]:
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
+    # Download global banned.yaml first so per-lab files can override it
+    global_keys = download_global_files(staging_dir)
+
     prefix = f"assignments/{assignment}/"
     keys = download_assignment(prefix, staging_dir)
     if not keys:
@@ -48,7 +51,7 @@ def setup_assignment(assignment: str) -> dict[str, str | int]:
     activate_staging_dir(staging_dir)
     return {
         "assignment": assignment,
-        "files_downloaded": len(keys),
+        "files_downloaded": len(global_keys) + len(keys),
         "config_dir": str(CURRENT_CONFIG_DIR),
     }
 
@@ -92,15 +95,36 @@ def activate_staging_dir(staging_dir: Path) -> None:
             shutil.rmtree(backup_dir)
 
 
-def download_assignment(prefix: str, destination: Path) -> list[str]:
+GLOBAL_FILES = ["banned.yaml"]
+
+
+def download_global_files(destination: Path) -> list[str]:
     bucket_name = required_env("R2_BUCKET_NAME")
-    client = boto3.client(
+    client = _r2_client()
+    downloaded: list[str] = []
+    for key in GLOBAL_FILES:
+        local_path = destination / key
+        try:
+            client.download_file(bucket_name, key, str(local_path))
+            downloaded.append(key)
+        except client.exceptions.ClientError:
+            pass  # global file is optional
+    return downloaded
+
+
+def _r2_client():
+    return boto3.client(
         "s3",
         endpoint_url=f"https://{required_env('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com",
         aws_access_key_id=required_env("R2_ACCESS_KEY_ID"),
         aws_secret_access_key=required_env("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
     )
+
+
+def download_assignment(prefix: str, destination: Path) -> list[str]:
+    bucket_name = required_env("R2_BUCKET_NAME")
+    client = _r2_client()
 
     paginator = client.get_paginator("list_objects_v2")
     downloaded_keys: list[str] = []
