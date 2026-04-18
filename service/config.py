@@ -24,3 +24,6 @@ def required_env(name: str) -> str:
     if value:
         return value
     raise ServiceError(f"Missing required environment variable: {name}")
+
+
+ENGINE_SECRET = os.environ.get("ENGINE_SECRET", "")

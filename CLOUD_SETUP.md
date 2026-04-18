@@ -3,7 +3,7 @@
 ## 1. R2 bucket layout
 
 ```
-autoscan-assignments/
+your-bucket-name/
   banned.yaml
   assignments/
     S0/
@@ -18,7 +18,8 @@ autoscan-assignments/
 R2_ACCOUNT_ID=your-cloudflare-account-id
 R2_ACCESS_KEY_ID=your-r2-access-key-id
 R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
-R2_BUCKET_NAME=autoscan-assignments
+R2_BUCKET_NAME=your-bucket-name
+ENGINE_SECRET=your-shared-secret
 ```
 
 ## 3. Deploy

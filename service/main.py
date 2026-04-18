@@ -6,11 +6,18 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 
 from service.bridge import run_grading_pipeline
-from service.config import ServiceError
+from service.config import ENGINE_SECRET, ServiceError
 from service.storage import ensure_active_config, extract_zip, setup_assignment
+
+
+def verify_secret(x_autoscan_secret: str | None = Header(default=None)) -> None:
+    if not ENGINE_SECRET:
+        return  # not configured — dev mode, allow all
+    if x_autoscan_secret != ENGINE_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,7 +37,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/setup/{assignment}")
+@app.post("/setup/{assignment}", dependencies=[Depends(verify_secret)])
 def setup_assignment_route(assignment: str) -> dict[str, str | int]:
     try:
         result = setup_assignment(assignment)
@@ -41,7 +48,7 @@ def setup_assignment_route(assignment: str) -> dict[str, str | int]:
     return {"status": "ok", **result}
 
 
-@app.post("/grade")
+@app.post("/grade", dependencies=[Depends(verify_secret)])
 async def grade_submission(file: UploadFile = File(...)) -> dict:
     try:
         ensure_active_config()
