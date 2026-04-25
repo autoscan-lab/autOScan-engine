@@ -59,7 +59,9 @@ func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch 
 	return result
 }
 
-func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) ([]domain.SimilarityPairResult, error) {
+func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
+	report := domain.SimilarityReport{SourceFile: srcFile}
+
 	type fingerprintItem struct {
 		idx int
 		fp  domain.FileFingerprint
@@ -80,9 +82,10 @@ func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string
 
 	if len(fps) < 2 {
 		if failures > 0 && len(fps) == 0 {
-			return nil, fmt.Errorf("no fingerprints created (%d failures). check source file selection and parseability", failures)
+			return report, fmt.Errorf("no fingerprints created (%d failures). check source file selection and parseability", failures)
 		}
-		return []domain.SimilarityPairResult{}, nil
+		report.Pairs = []domain.SimilarityPairResult{}
+		return report, nil
 	}
 
 	var pairs []domain.SimilarityPairResult
@@ -98,16 +101,17 @@ func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string
 				cfg,
 			)
 			pairs = append(pairs, domain.SimilarityPairResult{
-				AIndex: a.idx,
-				BIndex: b.idx,
-				Result: res,
+				A:                submissions[a.idx].ID,
+				B:                submissions[b.idx].ID,
+				PlagiarismResult: res,
 			})
 		}
 	}
 
 	sort.Slice(pairs, func(i, j int) bool {
-		return pairs[i].Result.WindowJaccard > pairs[j].Result.WindowJaccard
+		return pairs[i].WindowJaccard > pairs[j].WindowJaccard
 	})
 
-	return pairs, nil
+	report.Pairs = pairs
+	return report, nil
 }

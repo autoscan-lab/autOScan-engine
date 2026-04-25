@@ -19,78 +19,31 @@ import (
 var version = "dev"
 
 type bridgeEvent struct {
-	Type            string                   `json:"type"`
-	Message         string                   `json:"message,omitempty"`
-	Version         string                   `json:"version,omitempty"`
-	Discovery       *discoveryPayload        `json:"discovery,omitempty"`
-	Compile         *compilePayload          `json:"compile,omitempty"`
-	Scan            *scanPayload             `json:"scan,omitempty"`
-	Run             *runCompletePayload      `json:"run,omitempty"`
-	TestCaseStarted *testCaseStartedPayload  `json:"test_case_started,omitempty"`
-	TestCase        *testCaseCompletePayload `json:"test_case,omitempty"`
-	TestsComplete   *testsCompletePayload    `json:"tests_complete,omitempty"`
+	Type            string                  `json:"type"`
+	Message         string                  `json:"message,omitempty"`
+	Version         string                  `json:"version,omitempty"`
+	Discovery       *discoveryPayload       `json:"discovery,omitempty"`
+	Compile         *compileEventPayload    `json:"compile,omitempty"`
+	Scan            *scanEventPayload       `json:"scan,omitempty"`
+	Run             *domain.RunReport       `json:"run,omitempty"`
+	TestCaseStarted *testCaseStartedPayload `json:"test_case_started,omitempty"`
+	TestCase        *domain.TestCaseResult  `json:"test_case,omitempty"`
+	TestsComplete   *domain.TestSummary     `json:"tests_complete,omitempty"`
 }
 
 type discoveryPayload struct {
 	SubmissionCount int                 `json:"submission_count"`
-	Submissions     []submissionPayload `json:"submissions"`
+	Submissions     []domain.Submission `json:"submissions"`
 }
 
-type compilePayload struct {
+type compileEventPayload struct {
 	SubmissionID string `json:"submission_id"`
-	OK           bool   `json:"ok"`
-	ExitCode     int    `json:"exit_code"`
-	TimedOut     bool   `json:"timed_out"`
-	DurationMs   int64  `json:"duration_ms"`
-	Stdout       string `json:"stdout,omitempty"`
-	Stderr       string `json:"stderr,omitempty"`
+	domain.CompileResult
 }
 
-type scanPayload struct {
-	SubmissionID string   `json:"submission_id"`
-	BannedHits   int      `json:"banned_hits"`
-	ParseErrors  []string `json:"parse_errors,omitempty"`
-}
-
-type runCompletePayload struct {
-	Summary     runSummaryPayload     `json:"summary"`
-	Submissions []runSubmissionResult `json:"submissions"`
-}
-
-type runSummaryPayload struct {
-	PolicyName            string         `json:"policy_name"`
-	Root                  string         `json:"root"`
-	StartedAt             string         `json:"started_at"`
-	FinishedAt            string         `json:"finished_at"`
-	DurationMs            int64          `json:"duration_ms"`
-	TotalSubmissions      int            `json:"total_submissions"`
-	CompilePass           int            `json:"compile_pass"`
-	CompileFail           int            `json:"compile_fail"`
-	CompileTimeout        int            `json:"compile_timeout"`
-	CleanSubmissions      int            `json:"clean_submissions"`
-	SubmissionsWithBanned int            `json:"submissions_with_banned"`
-	BannedHitsTotal       int            `json:"banned_hits_total"`
-	TopBannedFunctions    map[string]int `json:"top_banned_functions"`
-}
-
-type runSubmissionResult struct {
-	ID             string             `json:"id"`
-	Path           string             `json:"path"`
-	Status         string             `json:"status"`
-	CFiles         []string           `json:"c_files"`
-	CompileOK      bool               `json:"compile_ok"`
-	CompileTimeout bool               `json:"compile_timeout"`
-	ExitCode       int                `json:"exit_code"`
-	CompileTimeMs  int64              `json:"compile_time_ms"`
-	Stderr         string             `json:"stderr,omitempty"`
-	BannedCount    int                `json:"banned_count"`
-	BannedHits     []bannedHitPayload `json:"banned_hits,omitempty"`
-}
-
-type submissionPayload struct {
-	ID     string   `json:"id"`
-	Path   string   `json:"path"`
-	CFiles []string `json:"c_files"`
+type scanEventPayload struct {
+	SubmissionID string `json:"submission_id"`
+	domain.ScanResult
 }
 
 type capabilitiesPayload struct {
@@ -99,49 +52,10 @@ type capabilitiesPayload struct {
 	DiffPayload bool `json:"diff_payload"`
 }
 
-type bannedHitPayload struct {
-	Function string `json:"function"`
-	File     string `json:"file"`
-	Line     int    `json:"line,omitempty"`
-	Column   int    `json:"column,omitempty"`
-	Snippet  string `json:"snippet,omitempty"`
-}
-
 type testCaseStartedPayload struct {
 	SubmissionID  string `json:"submission_id"`
 	TestCaseIndex int    `json:"test_case_index"`
 	TestCaseName  string `json:"test_case_name"`
-}
-
-type diffLinePayload struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	LineNum int    `json:"line_num,omitempty"`
-}
-
-type testCaseCompletePayload struct {
-	SubmissionID   string            `json:"submission_id"`
-	TestCaseIndex  int               `json:"test_case_index"`
-	TestCaseName   string            `json:"test_case_name"`
-	Status         string            `json:"status"`
-	ExitCode       int               `json:"exit_code"`
-	DurationMs     int64             `json:"duration_ms"`
-	Stdout         string            `json:"stdout,omitempty"`
-	Stderr         string            `json:"stderr,omitempty"`
-	OutputMatch    string            `json:"output_match,omitempty"`
-	ExpectedOutput *string           `json:"expected_output,omitempty"`
-	ActualOutput   *string           `json:"actual_output,omitempty"`
-	DiffLines      []diffLinePayload `json:"diff_lines,omitempty"`
-	Message        string            `json:"message,omitempty"`
-}
-
-type testsCompletePayload struct {
-	SubmissionID        string `json:"submission_id"`
-	Total               int    `json:"total"`
-	Passed              int    `json:"passed"`
-	Failed              int    `json:"failed"`
-	CompileFailed       int    `json:"compile_failed"`
-	MissingExpectedFile int    `json:"missing_expected_output"`
 }
 
 type eventWriter struct {
@@ -241,13 +155,7 @@ func runCommand(writer *eventWriter, args []string) error {
 		return emitCommandError(writer, errors.New("missing required --policy"))
 	}
 
-	if *configDir != "" {
-		if err := os.Setenv("AUTOSCAN_CONFIG_DIR", *configDir); err != nil {
-			return fmt.Errorf("setting AUTOSCAN_CONFIG_DIR: %w", err)
-		}
-	}
-
-	loadedPolicy, err := policy.LoadWithGlobals(*policyPath)
+	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(*policyPath, *configDir)
 	if err != nil {
 		return fmt.Errorf("loading policy: %w", err)
 	}
@@ -286,14 +194,7 @@ func runCommand(writer *eventWriter, args []string) error {
 		OnDiscoveryComplete: func(submissions []domain.Submission) {
 			payload := discoveryPayload{
 				SubmissionCount: len(submissions),
-				Submissions:     make([]submissionPayload, len(submissions)),
-			}
-			for index, submission := range submissions {
-				payload.Submissions[index] = submissionPayload{
-					ID:     submission.ID,
-					Path:   submission.Path,
-					CFiles: submission.CFiles,
-				}
+				Submissions:     append([]domain.Submission(nil), submissions...),
 			}
 			_ = writer.emit(bridgeEvent{
 				Type:      "discovery_complete",
@@ -303,31 +204,26 @@ func runCommand(writer *eventWriter, args []string) error {
 		OnCompileComplete: func(sub domain.Submission, result domain.CompileResult) {
 			_ = writer.emit(bridgeEvent{
 				Type: "compile_complete",
-				Compile: &compilePayload{
-					SubmissionID: sub.ID,
-					OK:           result.OK,
-					ExitCode:     result.ExitCode,
-					TimedOut:     result.TimedOut,
-					DurationMs:   result.DurationMs,
-					Stdout:       result.Stdout,
-					Stderr:       result.Stderr,
+				Compile: &compileEventPayload{
+					SubmissionID:  sub.ID,
+					CompileResult: result,
 				},
 			})
 		},
 		OnScanComplete: func(sub domain.Submission, result domain.ScanResult) {
 			_ = writer.emit(bridgeEvent{
 				Type: "scan_complete",
-				Scan: &scanPayload{
+				Scan: &scanEventPayload{
 					SubmissionID: sub.ID,
-					BannedHits:   result.TotalHits(),
-					ParseErrors:  result.ParseErrors,
+					ScanResult:   result,
 				},
 			})
 		},
 		OnAllComplete: func(report domain.RunReport) {
+			reportCopy := report
 			_ = writer.emit(bridgeEvent{
 				Type: "run_complete",
-				Run:  buildRunCompletePayload(report),
+				Run:  &reportCopy,
 			})
 		},
 	})
@@ -376,13 +272,7 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 		return emitCommandError(writer, errors.New("missing required --test-case-index"))
 	}
 
-	if *configDir != "" {
-		if err := os.Setenv("AUTOSCAN_CONFIG_DIR", *configDir); err != nil {
-			return fmt.Errorf("setting AUTOSCAN_CONFIG_DIR: %w", err)
-		}
-	}
-
-	loadedPolicy, err := policy.LoadWithGlobals(*policyPath)
+	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(*policyPath, *configDir)
 	if err != nil {
 		return fmt.Errorf("loading policy: %w", err)
 	}
@@ -408,14 +298,7 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 
 	discoveryData := discoveryPayload{
 		SubmissionCount: len(submissions),
-		Submissions:     make([]submissionPayload, len(submissions)),
-	}
-	for index, submission := range submissions {
-		discoveryData.Submissions[index] = submissionPayload{
-			ID:     submission.ID,
-			Path:   submission.Path,
-			CFiles: submission.CFiles,
-		}
+		Submissions:     append([]domain.Submission(nil), submissions...),
 	}
 	_ = writer.emit(bridgeEvent{Type: "discovery_complete", Discovery: &discoveryData})
 
@@ -460,29 +343,19 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 	compileResult := compiled[0]
 	_ = writer.emit(bridgeEvent{
 		Type: "compile_complete",
-		Compile: &compilePayload{
-			SubmissionID: target.ID,
-			OK:           compileResult.OK,
-			ExitCode:     compileResult.ExitCode,
-			TimedOut:     compileResult.TimedOut,
-			DurationMs:   compileResult.DurationMs,
-			Stdout:       compileResult.Stdout,
-			Stderr:       compileResult.Stderr,
+		Compile: &compileEventPayload{
+			SubmissionID:  target.ID,
+			CompileResult: compileResult,
 		},
 	})
 
 	testCases := loadedPolicy.Run.TestCases
 	if len(testCases) == 0 {
+		summary := domain.EmptyTestSummary()
+		summary.SubmissionID = target.ID
 		_ = writer.emit(bridgeEvent{
-			Type: "tests_complete",
-			TestsComplete: &testsCompletePayload{
-				SubmissionID:        target.ID,
-				Total:               0,
-				Passed:              0,
-				Failed:              0,
-				CompileFailed:       0,
-				MissingExpectedFile: 0,
-			},
+			Type:          "tests_complete",
+			TestsComplete: &summary,
 		})
 		return nil
 	}
@@ -493,22 +366,15 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 		return errors.New(msg)
 	}
 
-	summary := testsCompletePayload{SubmissionID: target.ID, Total: 1}
+	summary := domain.NewTestSummary(1)
+	summary.SubmissionID = target.ID
 	tc := testCases[*testCaseIndex]
 
 	if compileResult.TimedOut || !compileResult.OK {
-		summary.CompileFailed = 1
+		summary.AddCase(domain.NewCompileFailedTestCaseResult(target.ID, *testCaseIndex, tc.Name, compileResult.ExitCode))
 		_ = writer.emit(bridgeEvent{
-			Type: "test_case_complete",
-			TestCase: &testCaseCompletePayload{
-				SubmissionID:  target.ID,
-				TestCaseIndex: *testCaseIndex,
-				TestCaseName:  tc.Name,
-				Status:        "compile_failed",
-				ExitCode:      compileResult.ExitCode,
-				DurationMs:    0,
-				Message:       "Compilation failed; test was not executed.",
-			},
+			Type:     "test_case_complete",
+			TestCase: &summary.Cases[0],
 		})
 		_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
 		return nil
@@ -526,18 +392,8 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 	})
 
 	result := executor.ExecuteTestCase(context.Background(), target, tc)
-	payload, missingExpected := buildTestCaseCompletePayload(target, *testCaseIndex, tc, result)
-	if missingExpected {
-		summary.MissingExpectedFile++
-	}
-
-	if payload.Status == "pass" {
-		summary.Passed = 1
-	} else if payload.Status == "compile_failed" {
-		summary.CompileFailed = 1
-	} else {
-		summary.Failed = 1
-	}
+	payload := buildTestCaseCompletePayload(loadedPolicy, target, *testCaseIndex, tc, result)
+	summary.AddCase(*payload)
 
 	_ = writer.emit(bridgeEvent{Type: "test_case_complete", TestCase: payload})
 	_ = writer.emit(bridgeEvent{Type: "tests_complete", TestsComplete: &summary})
@@ -545,66 +401,28 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 }
 
 func buildTestCaseCompletePayload(
+	loadedPolicy *policy.Policy,
 	submission domain.Submission,
 	index int,
 	tc policy.TestCase,
 	result domain.ExecuteResult,
-) (*testCaseCompletePayload, bool) {
-	status := "pass"
-	if result.TimedOut {
-		status = "timeout"
-	} else if !result.Passed {
-		status = "fail"
-	}
-
-	actualOutput := result.Stdout
-	payload := &testCaseCompletePayload{
-		SubmissionID:  submission.ID,
-		TestCaseIndex: index,
-		TestCaseName:  tc.Name,
-		Status:        status,
-		ExitCode:      result.ExitCode,
-		DurationMs:    result.Duration.Milliseconds(),
-		Stdout:        result.Stdout,
-		Stderr:        result.Stderr,
-		OutputMatch:   string(result.OutputMatch),
-		ActualOutput:  &actualOutput,
-	}
-
-	expectedOutput, expectedAvailable := loadExpectedOutput(tc)
+) *domain.TestCaseResult {
+	var expectedOutput *string
+	output, expectedAvailable := loadExpectedOutput(loadedPolicy, tc)
 	if expectedAvailable {
-		payload.ExpectedOutput = &expectedOutput
+		expectedOutput = &output
 	}
 
-	if len(result.OutputDiff) > 0 {
-		payload.DiffLines = make([]diffLinePayload, len(result.OutputDiff))
-		for i, line := range result.OutputDiff {
-			payload.DiffLines[i] = diffLinePayload{
-				Type:    line.Type,
-				Content: line.Content,
-				LineNum: line.LineNum,
-			}
-		}
-	}
-
-	if result.OutputMatch == domain.OutputMatchMissing {
-		payload.Message = "Expected output file was not found."
-	}
-
-	return payload, result.OutputMatch == domain.OutputMatchMissing
+	payload := result.TestCaseResult(submission.ID, index, expectedOutput)
+	return &payload
 }
 
-func loadExpectedOutput(tc policy.TestCase) (string, bool) {
+func loadExpectedOutput(loadedPolicy *policy.Policy, tc policy.TestCase) (string, bool) {
 	if tc.ExpectedOutputFile == "" {
 		return "", false
 	}
 
-	configDir, err := policy.ConfigDir()
-	if err != nil {
-		return "", false
-	}
-
-	expectedPath := filepath.Join(configDir, "expected_outputs", tc.ExpectedOutputFile)
+	expectedPath := filepath.Join(loadedPolicy.EffectiveConfigDir(), "expected_outputs", tc.ExpectedOutputFile)
 	data, err := os.ReadFile(expectedPath)
 	if err != nil {
 		return "", false
@@ -620,53 +438,4 @@ func findSubmissionByID(submissions []domain.Submission, submissionID string) (d
 		}
 	}
 	return domain.Submission{}, false
-}
-
-func buildRunCompletePayload(report domain.RunReport) *runCompletePayload {
-	payload := &runCompletePayload{
-		Summary: runSummaryPayload{
-			PolicyName:            report.PolicyName,
-			Root:                  report.Root,
-			StartedAt:             report.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-			FinishedAt:            report.FinishedAt.Format("2006-01-02T15:04:05Z07:00"),
-			DurationMs:            report.Summary.DurationMs,
-			TotalSubmissions:      report.Summary.TotalSubmissions,
-			CompilePass:           report.Summary.CompilePass,
-			CompileFail:           report.Summary.CompileFail,
-			CompileTimeout:        report.Summary.CompileTimeout,
-			CleanSubmissions:      report.Summary.CleanSubmissions,
-			SubmissionsWithBanned: report.Summary.SubmissionsWithBanned,
-			BannedHitsTotal:       report.Summary.BannedHitsTotal,
-			TopBannedFunctions:    report.Summary.TopBannedFunctions,
-		},
-		Submissions: make([]runSubmissionResult, len(report.Results)),
-	}
-
-	for index, result := range report.Results {
-		payload.Submissions[index] = runSubmissionResult{
-			ID:             result.Submission.ID,
-			Path:           result.Submission.Path,
-			Status:         string(result.Status),
-			CFiles:         result.Submission.CFiles,
-			CompileOK:      result.Compile.OK,
-			CompileTimeout: result.Compile.TimedOut,
-			ExitCode:       result.Compile.ExitCode,
-			CompileTimeMs:  result.Compile.DurationMs,
-			Stderr:         result.Compile.Stderr,
-			BannedCount:    result.Scan.TotalHits(),
-			BannedHits:     make([]bannedHitPayload, len(result.Scan.Hits)),
-		}
-
-		for hitIndex, hit := range result.Scan.Hits {
-			payload.Submissions[index].BannedHits[hitIndex] = bannedHitPayload{
-				Function: hit.Function,
-				File:     hit.File,
-				Line:     hit.Line,
-				Column:   hit.Column,
-				Snippet:  hit.Snippet,
-			}
-		}
-	}
-
-	return payload
 }

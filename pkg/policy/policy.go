@@ -16,6 +16,7 @@ type Policy struct {
 	LibraryFiles    []string      `yaml:"library_files"` // .c/.o/.h files from ~/.config/autoscan/libraries/
 	TestFiles       []string      `yaml:"test_files,omitempty"`
 	FilePath        string        `yaml:"-"` // Set after loading
+	ConfigDir       string        `yaml:"-"` // Directory for banned.yaml, libraries, test files, expected outputs
 	BannedFunctions []string      `yaml:"-"` // Loaded from global banned.yaml
 }
 
@@ -72,6 +73,9 @@ func Load(path string) (*Policy, error) {
 	}
 
 	p.FilePath = path
+	if configDir, err := ConfigDir(); err == nil {
+		p.ConfigDir = configDir
+	}
 	if p.Compile.GCC == "" {
 		p.Compile.GCC = "gcc"
 	}
@@ -79,16 +83,20 @@ func Load(path string) (*Policy, error) {
 }
 
 func LoadWithGlobals(path string) (*Policy, error) {
+	return LoadWithGlobalsFromConfigDir(path, "")
+}
+
+func LoadWithGlobalsFromConfigDir(path, configDir string) (*Policy, error) {
 	p, err := Load(path)
 	if err != nil {
 		return nil, err
 	}
 
-	bannedFile, err := BannedFilePath()
-	if err != nil {
-		return p, nil
+	if strings.TrimSpace(configDir) != "" {
+		p.ConfigDir = configDir
 	}
 
+	bannedFile := filepath.Join(p.EffectiveConfigDir(), "banned.yaml")
 	bannedFuncs, err := LoadGlobalBanned(bannedFile)
 	if err != nil {
 		return nil, err
@@ -100,15 +108,22 @@ func LoadWithGlobals(path string) (*Policy, error) {
 
 // ConfigDir returns ~/.config/autoscan.
 func ConfigDir() (string, error) {
-	if override := strings.TrimSpace(os.Getenv("AUTOSCAN_CONFIG_DIR")); override != "" {
-		return override, nil
-	}
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "autoscan"), nil
+}
+
+func (p *Policy) EffectiveConfigDir() string {
+	if p != nil && strings.TrimSpace(p.ConfigDir) != "" {
+		return p.ConfigDir
+	}
+	configDir, err := ConfigDir()
+	if err != nil {
+		return filepath.Join(".", ".autoscan")
+	}
+	return configDir
 }
 
 // BannedFilePath returns ~/.config/autoscan/banned.yaml.

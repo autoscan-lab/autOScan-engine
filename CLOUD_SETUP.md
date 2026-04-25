@@ -4,7 +4,8 @@
 
 ```
 your-bucket-name/
-  banned.yaml
+  banned.yaml             # global, applied to every assignment
+  ai_dictionary.yaml      # global, optional — required only for AI-detection
   assignments/
     S0/
       policy.yml
@@ -37,3 +38,8 @@ fly deploy
 - `GET  /health`
 - `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/S0`)
 - `POST /grade` — accepts a zip, returns JSON results
+
+`/grade` accepts optional form fields:
+
+- `include_similarity=1` — adds pairwise plagiarism comparison (`similarity` in response)
+- `include_ai_detection=1` — compares each submission against `ai_dictionary.yaml` (`ai_detection` in response)

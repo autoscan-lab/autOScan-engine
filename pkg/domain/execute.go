@@ -15,9 +15,9 @@ const (
 )
 
 type DiffLine struct {
-	Type    string // "same", "added", "removed"
-	Content string
-	LineNum int
+	Type    string `json:"type"` // "same", "added", "removed"
+	Content string `json:"content"`
+	LineNum int    `json:"line_num,omitempty"`
 }
 
 type ExecuteResult struct {
@@ -36,12 +36,105 @@ type ExecuteResult struct {
 	OutputDiff   []DiffLine
 }
 
+type TestSummary struct {
+	SubmissionID          string           `json:"submission_id,omitempty"`
+	Total                 int              `json:"total"`
+	Passed                int              `json:"passed"`
+	Failed                int              `json:"failed"`
+	CompileFailed         int              `json:"compile_failed"`
+	MissingExpectedOutput int              `json:"missing_expected_output"`
+	Cases                 []TestCaseResult `json:"cases"`
+}
+
+type TestCaseResult struct {
+	SubmissionID   string     `json:"submission_id,omitempty"`
+	Index          int        `json:"index"`
+	Name           string     `json:"name"`
+	Status         string     `json:"status"`
+	ExitCode       int        `json:"exit_code"`
+	DurationMs     int64      `json:"duration_ms"`
+	Message        string     `json:"message,omitempty"`
+	OutputMatch    string     `json:"output_match,omitempty"`
+	Stdout         string     `json:"stdout,omitempty"`
+	Stderr         string     `json:"stderr,omitempty"`
+	ExpectedOutput *string    `json:"expected_output,omitempty"`
+	ActualOutput   *string    `json:"actual_output,omitempty"`
+	DiffLines      []DiffLine `json:"diff_lines,omitempty"`
+}
+
 func NewExecuteResult(ok bool, exitCode int, stdout, stderr string, duration time.Duration, timedOut bool, args []string, input string) ExecuteResult {
 	return ExecuteResult{
 		OK: ok, ExitCode: exitCode, Stdout: stdout, Stderr: stderr,
 		Duration: duration, TimedOut: timedOut, Args: args, Input: input,
 		Passed: ok && !timedOut,
 	}
+}
+
+func EmptyTestSummary() TestSummary {
+	return TestSummary{Cases: []TestCaseResult{}}
+}
+
+func NewTestSummary(total int) TestSummary {
+	return TestSummary{Total: total, Cases: make([]TestCaseResult, 0, total)}
+}
+
+func (s *TestSummary) AddCase(result TestCaseResult) {
+	s.Cases = append(s.Cases, result)
+
+	switch result.Status {
+	case "pass":
+		s.Passed++
+	case "compile_failed":
+		s.CompileFailed++
+	default:
+		s.Failed++
+	}
+
+	if result.OutputMatch == string(OutputMatchMissing) {
+		s.MissingExpectedOutput++
+	}
+}
+
+func NewCompileFailedTestCaseResult(submissionID string, index int, name string, exitCode int) TestCaseResult {
+	return TestCaseResult{
+		SubmissionID: submissionID,
+		Index:        index,
+		Name:         name,
+		Status:       "compile_failed",
+		ExitCode:     exitCode,
+		Message:      "Compilation failed; test was not executed.",
+	}
+}
+
+func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOutput *string) TestCaseResult {
+	status := "pass"
+	if r.TimedOut {
+		status = "timeout"
+	} else if !r.Passed {
+		status = "fail"
+	}
+
+	actualOutput := r.Stdout
+	result := TestCaseResult{
+		SubmissionID:   submissionID,
+		Index:          index,
+		Name:           r.TestCaseName,
+		Status:         status,
+		ExitCode:       r.ExitCode,
+		DurationMs:     r.Duration.Milliseconds(),
+		Stdout:         r.Stdout,
+		Stderr:         r.Stderr,
+		OutputMatch:    string(r.OutputMatch),
+		ExpectedOutput: expectedOutput,
+		ActualOutput:   &actualOutput,
+		DiffLines:      r.OutputDiff,
+	}
+
+	if r.OutputMatch == OutputMatchMissing {
+		result.Message = "Expected output file was not found."
+	}
+
+	return result
 }
 
 func (r ExecuteResult) WithTestCase(name string, expectedExit *int) ExecuteResult {

@@ -163,6 +163,8 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, e.policy.Compile.GCC, args...)
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = sub.Path
 
 	var stdout, stderr bytes.Buffer
@@ -205,11 +207,7 @@ func (e *CompileEngine) resolveLibraryFiles() ([]string, string, []string) {
 		return e.cachedLibFiles, e.cachedLibDir, e.cachedLibWarn
 	}
 
-	configDir, err := policy.ConfigDir()
-	if err != nil {
-		configDir = filepath.Join(".", ".autoscan")
-	}
-	libDir := filepath.Join(configDir, "libraries")
+	libDir := filepath.Join(e.policy.EffectiveConfigDir(), "libraries")
 
 	var libraryFiles []string
 	var warnings []string
@@ -266,6 +264,7 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 	var allCmds []string
 	allOK := true
 	exitCode := 0
+	timedOut := false
 
 	for _, proc := range mp.Executables {
 		sourceFile := filepath.Join(sub.Path, proc.SourceFile)
@@ -287,6 +286,8 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 
 		timeoutCtx, cancel := context.WithTimeout(ctx, e.timeout)
 		cmd := exec.CommandContext(timeoutCtx, e.policy.Compile.GCC, args...)
+		configureProcessGroup(cmd)
+		cmd.Cancel = func() error { return killProcessGroup(cmd) }
 		cmd.Dir = sub.Path
 
 		var stdout, stderr bytes.Buffer
@@ -294,6 +295,9 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		cmd.Stderr = &stderr
 
 		err := cmd.Run()
+		if timeoutCtx.Err() == context.DeadlineExceeded {
+			timedOut = true
+		}
 		cancel()
 
 		fullCmd := append([]string{e.policy.Compile.GCC}, args...)
@@ -319,5 +323,5 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		}
 	}
 
-	return domain.NewCompileResult(allOK, allCmds, exitCode, allStdout.String(), allStderr.String(), time.Since(start).Milliseconds(), false)
+	return domain.NewCompileResult(allOK, allCmds, exitCode, allStdout.String(), allStderr.String(), time.Since(start).Milliseconds(), timedOut)
 }

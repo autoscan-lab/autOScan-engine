@@ -1,4 +1,4 @@
-FROM golang:1.22 AS builder
+FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
@@ -6,27 +6,21 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o /out/autoscan-bridge ./cmd/autoscan-bridge
+RUN CGO_ENABLED=1 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/autoscan-server ./cmd/autoscan-server
 
-FROM python:3.12-slim-bookworm
+FROM debian:bookworm-slim
 
-ENV PYTHONUNBUFFERED=1
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc make libc6-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc make libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY service/requirements.txt ./service/requirements.txt
-RUN pip install --no-cache-dir -r ./service/requirements.txt
-
-COPY --from=builder /out/autoscan-bridge /usr/local/bin/autoscan-bridge
-COPY service ./service
+COPY --from=builder /out/autoscan-server /usr/local/bin/autoscan-server
 
 RUN mkdir -p /data
 
 EXPOSE 8080
 
-CMD ["uvicorn", "service.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["autoscan-server"]

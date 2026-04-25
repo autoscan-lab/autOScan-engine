@@ -42,7 +42,7 @@ func NewExecutorWithOptions(p *policy.Policy, binaryDir string, shortNames bool)
 	return internalengine.NewExecutorWithOptions(p, binaryDir, shortNames)
 }
 
-func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) ([]domain.SimilarityPairResult, error) {
+func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
 	return internalengine.ComputeSimilarityForProcess(submissions, srcFile, cfg)
 }
 

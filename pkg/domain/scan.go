@@ -1,11 +1,11 @@
 package domain
 
 type BannedHit struct {
-	Function string
-	File     string
-	Line     int
-	Column   int
-	Snippet  string
+	Function string `json:"function"`
+	File     string `json:"file"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Snippet  string `json:"snippet,omitempty"`
 }
 
 func NewBannedHit(function, file string, line, column int, snippet string) BannedHit {
@@ -13,9 +13,9 @@ func NewBannedHit(function, file string, line, column int, snippet string) Banne
 }
 
 type ScanResult struct {
-	Hits           []BannedHit
-	HitsByFunction map[string][]BannedHit
-	ParseErrors    []string
+	Hits           []BannedHit            `json:"hits,omitempty"`
+	HitsByFunction map[string][]BannedHit `json:"-"`
+	ParseErrors    []string               `json:"parse_errors,omitempty"`
 }
 
 func NewScanResult(hits []BannedHit, parseErrors []string) ScanResult {

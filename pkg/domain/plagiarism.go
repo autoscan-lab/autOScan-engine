@@ -28,35 +28,40 @@ type TokenSpan struct {
 }
 
 type MatchSpan struct {
-	StartLine int // 1-based line number
-	StartCol  int // 1-based column number
-	EndLine   int // 1-based line number
-	EndCol    int // 1-based column number
-	Snippet   string
+	StartLine int    `json:"start_line"` // 1-based line number
+	StartCol  int    `json:"start_col"`  // 1-based column number
+	EndLine   int    `json:"end_line"`   // 1-based line number
+	EndCol    int    `json:"end_col"`    // 1-based column number
+	Snippet   string `json:"snippet"`
 }
 
 type WindowMatch struct {
-	Hash   string
-	SpansA []MatchSpan
-	SpansB []MatchSpan
+	Hash   string      `json:"hash"`
+	SpansA []MatchSpan `json:"spans_a,omitempty"`
+	SpansB []MatchSpan `json:"spans_b,omitempty"`
 }
 
 type PlagiarismResult struct {
-	FileA             string
-	FileB             string
-	FunctionCountA    int
-	FunctionCountB    int
-	ExactMatches      int
-	WindowMatches     int
-	WindowUnion       int
-	WindowJaccard     float64
-	PerFuncSimilarity float64
-	Flagged           bool
-	Matches           []WindowMatch
+	FileA             string        `json:"file_a"`
+	FileB             string        `json:"file_b"`
+	FunctionCountA    int           `json:"function_count_a"`
+	FunctionCountB    int           `json:"function_count_b"`
+	ExactMatches      int           `json:"exact_matches"`
+	WindowMatches     int           `json:"window_matches"`
+	WindowUnion       int           `json:"window_union,omitempty"`
+	WindowJaccard     float64       `json:"window_jaccard"`
+	PerFuncSimilarity float64       `json:"per_func_similarity"`
+	Flagged           bool          `json:"flagged"`
+	Matches           []WindowMatch `json:"matches,omitempty"`
+}
+
+type SimilarityReport struct {
+	SourceFile string                 `json:"source_file"`
+	Pairs      []SimilarityPairResult `json:"pairs"`
 }
 
 type SimilarityPairResult struct {
-	AIndex int
-	BIndex int
-	Result PlagiarismResult
+	A string `json:"a"`
+	B string `json:"b"`
+	PlagiarismResult
 }

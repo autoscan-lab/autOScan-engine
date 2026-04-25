@@ -131,7 +131,6 @@ autOScan-engine/
 ├── pkg/domain/            # Shared engine models/results
 ├── pkg/policy/            # Policy models/loading/helpers
 ├── pkg/ai/                # AI dictionary parsing/validation
-├── pkg/export/            # JSON/CSV report exporters
 └── internal/engine/       # Engine internals
 ```
 
@@ -149,8 +148,9 @@ Engine runtime behavior is compatible with:
 └── banned.yaml
 ```
 
-Set `AUTOSCAN_CONFIG_DIR` to override the default config location when embedding
-the engine or using the bridge from another app.
+When embedding the engine, set `Policy.ConfigDir` or load with
+`policy.LoadWithGlobalsFromConfigDir`. The bridge exposes the same override
+through `--config-dir`.
 
 For HTTP service setup, required environment variables, and Fly deployment,
 see [CLOUD_SETUP.md](./CLOUD_SETUP.md).

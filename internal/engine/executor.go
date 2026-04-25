@@ -33,11 +33,8 @@ type Executor struct {
 
 func NewExecutorWithOptions(p *policy.Policy, binaryDir string, shortNames bool) *Executor {
 	outputName := strings.TrimSuffix(p.Compile.SourceFile, ".c")
+	configDir := p.EffectiveConfigDir()
 
-	configDir, err := policy.ConfigDir()
-	if err != nil {
-		configDir = filepath.Join(".", ".autoscan")
-	}
 	return &Executor{
 		policy:             p,
 		binaryDir:          binaryDir,
@@ -72,6 +69,8 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	resolvedArgs := e.resolveTestFilePaths(args)
 
 	cmd := exec.CommandContext(ctx, binaryPath, resolvedArgs...)
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
 	if input != "" {
 		cmd.Stdin = strings.NewReader(unescapeInput(input))
@@ -84,7 +83,7 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	start := time.Now()
 	err := cmd.Run()
 	duration := time.Since(start)
-	timedOut := false
+	timedOut := ctx.Err() == context.DeadlineExceeded
 
 	exitCode := 0
 	if err != nil {
@@ -229,6 +228,8 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			}
 
 			cmd := exec.CommandContext(ctx, binaryPath, args...)
+			configureProcessGroup(cmd)
+			cmd.Cancel = func() error { return killProcessGroup(cmd) }
 			cmd.Dir = binaryDir
 			if input != "" {
 				cmd.Stdin = strings.NewReader(unescapeInput(input))
@@ -260,7 +261,7 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			go func() {
 				<-ctx.Done()
 				if cmd.Process != nil {
-					cmd.Process.Kill()
+					_ = killProcessGroup(cmd)
 				}
 				stdoutPipe.Close()
 				stderrPipe.Close()
@@ -329,7 +330,7 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			case err = <-done:
 			case <-ctx.Done():
 				if cmd.Process != nil {
-					cmd.Process.Kill()
+					_ = killProcessGroup(cmd)
 				}
 				err = <-done
 				procResult.Killed = true
@@ -340,6 +341,10 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			procResult.Running = false
 
 			if ctx.Err() == context.Canceled {
+				procResult.Killed = true
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				procResult.TimedOut = true
 				procResult.Killed = true
 			}
 

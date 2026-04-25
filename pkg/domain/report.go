@@ -3,10 +3,10 @@ package domain
 import "time"
 
 type SubmissionResult struct {
-	Submission Submission
-	Compile    CompileResult
-	Scan       ScanResult
-	Status     SubmissionStatus
+	Submission Submission       `json:"submission"`
+	Compile    CompileResult    `json:"compile"`
+	Scan       ScanResult       `json:"scan"`
+	Status     SubmissionStatus `json:"status"`
 }
 
 type SubmissionStatus string
@@ -34,24 +34,24 @@ func NewSubmissionResult(sub Submission, compile CompileResult, scan ScanResult)
 }
 
 type RunReport struct {
-	PolicyName string
-	Root       string
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Results    []SubmissionResult
-	Summary    SummaryStats
+	PolicyName string             `json:"policy_name"`
+	Root       string             `json:"root"`
+	StartedAt  time.Time          `json:"started_at"`
+	FinishedAt time.Time          `json:"finished_at"`
+	Results    []SubmissionResult `json:"results"`
+	Summary    SummaryStats       `json:"summary"`
 }
 
 type SummaryStats struct {
-	TotalSubmissions      int
-	CompilePass           int
-	CompileFail           int
-	CompileTimeout        int
-	BannedHitsTotal       int
-	SubmissionsWithBanned int
-	CleanSubmissions      int
-	TopBannedFunctions    map[string]int
-	DurationMs            int64
+	TotalSubmissions      int            `json:"total_submissions"`
+	CompilePass           int            `json:"compile_pass"`
+	CompileFail           int            `json:"compile_fail"`
+	CompileTimeout        int            `json:"compile_timeout"`
+	BannedHitsTotal       int            `json:"banned_hits_total"`
+	SubmissionsWithBanned int            `json:"submissions_with_banned"`
+	CleanSubmissions      int            `json:"clean_submissions"`
+	TopBannedFunctions    map[string]int `json:"top_banned_functions,omitempty"`
+	DurationMs            int64          `json:"duration_ms"`
 }
 
 func NewRunReport(policyName, root string, startedAt, finishedAt time.Time, results []SubmissionResult) RunReport {

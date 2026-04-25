@@ -34,15 +34,14 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 	}
 
 	results := make([]domain.AISubmissionResult, 0, len(submissions))
-	for i, sub := range submissions {
+	for _, sub := range submissions {
 		filePath := filepath.Join(sub.Path, srcFile)
 		fp, err := FingerprintFile(filePath, cfg)
 		if err != nil {
 			results = append(results, domain.AISubmissionResult{
-				SubmissionIndex: i,
-				SubmissionID:    filepath.Base(sub.ID),
-				SourceFile:      srcFile,
-				ParseError:      err.Error(),
+				SubmissionID: sub.ID,
+				SourceFile:   srcFile,
+				ParseError:   err.Error(),
 			})
 			continue
 		}
@@ -60,14 +59,13 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 		}
 
 		results = append(results, domain.AISubmissionResult{
-			SubmissionIndex: i,
-			SubmissionID:    filepath.Base(sub.ID),
-			SourceFile:      srcFile,
-			FunctionCount:   fp.FunctionCount,
-			MatchCount:      len(matches),
-			BestScore:       bestScore,
-			Flagged:         flagged,
-			Matches:         matches,
+			SubmissionID:  sub.ID,
+			SourceFile:    srcFile,
+			FunctionCount: fp.FunctionCount,
+			MatchCount:    len(matches),
+			BestScore:     bestScore,
+			Flagged:       flagged,
+			Matches:       matches,
 		})
 	}
 
@@ -81,7 +79,7 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 		return results[i].SubmissionID < results[j].SubmissionID
 	})
 
-	report.Results = results
+	report.Submissions = results
 	return report, nil
 }
 

@@ -1,13 +1,13 @@
 package domain
 
 type CompileResult struct {
-	OK         bool
-	Command    []string
-	ExitCode   int
-	Stdout     string
-	Stderr     string
-	DurationMs int64
-	TimedOut   bool
+	OK         bool     `json:"ok"`
+	Command    []string `json:"command,omitempty"`
+	ExitCode   int      `json:"exit_code"`
+	Stdout     string   `json:"stdout,omitempty"`
+	Stderr     string   `json:"stderr,omitempty"`
+	DurationMs int64    `json:"duration_ms"`
+	TimedOut   bool     `json:"timed_out"`
 }
 
 func NewCompileResult(ok bool, command []string, exitCode int, stdout, stderr string, durationMs int64, timedOut bool) CompileResult {
