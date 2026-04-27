@@ -24,8 +24,8 @@ type analysisOptions struct {
 	IncludeAIDetection      bool
 	SimilarityIncludeSpans  bool
 	AIDetectionIncludeSpans bool
-	SimilarityTopK          int
-	AIDetectionTopK         int
+	SimilarityMinScore      float64
+	AIDetectionMinScore     float64
 }
 
 // runAnalysis computes similarity and/or AI detection from a run's submissions.
@@ -46,7 +46,7 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing similarity: %w", err)
 		}
-		trimSimilarityReport(&result, opts.SimilarityIncludeSpans, opts.SimilarityTopK)
+		trimSimilarityReport(&result, opts.SimilarityIncludeSpans, opts.SimilarityMinScore)
 		sim = &result
 	}
 
@@ -59,19 +59,25 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing ai detection: %w", err)
 		}
-		trimAIDetectionReport(&result, opts.AIDetectionIncludeSpans, opts.AIDetectionTopK)
+		trimAIDetectionReport(&result, opts.AIDetectionIncludeSpans, opts.AIDetectionMinScore)
 		ai = &result
 	}
 
 	return sim, ai, nil
 }
 
-func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, topK int) {
+func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, minScore float64) {
 	if report == nil {
 		return
 	}
-	if topK > 0 && len(report.Pairs) > topK {
-		report.Pairs = report.Pairs[:topK]
+	if minScore > 0 {
+		filtered := report.Pairs[:0]
+		for _, pair := range report.Pairs {
+			if pair.SimilarityPercent >= minScore {
+				filtered = append(filtered, pair)
+			}
+		}
+		report.Pairs = filtered
 	}
 	if includeSpans {
 		return
@@ -81,12 +87,18 @@ func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, to
 	}
 }
 
-func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, topK int) {
+func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, minScore float64) {
 	if report == nil {
 		return
 	}
-	if topK > 0 && len(report.Submissions) > topK {
-		report.Submissions = report.Submissions[:topK]
+	if minScore > 0 {
+		filtered := report.Submissions[:0]
+		for _, submission := range report.Submissions {
+			if submission.BestScore*100 >= minScore {
+				filtered = append(filtered, submission)
+			}
+		}
+		report.Submissions = filtered
 	}
 	if includeSpans {
 		return

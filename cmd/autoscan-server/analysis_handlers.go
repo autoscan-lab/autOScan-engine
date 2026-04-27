@@ -11,9 +11,9 @@ import (
 )
 
 type analyzeRequest struct {
-	RunID        string `json:"run_id"`
-	IncludeSpans *bool  `json:"include_spans,omitempty"`
-	TopK         int    `json:"top_k,omitempty"`
+	RunID        string  `json:"run_id"`
+	IncludeSpans *bool   `json:"include_spans,omitempty"`
+	MinScore     float64 `json:"min_score,omitempty"`
 }
 
 type similarityAnalysisSummary struct {
@@ -54,7 +54,7 @@ func (s *server) analyzeSimilarity(w http.ResponseWriter, r *http.Request) {
 	similarity, _, err := runAnalysis(s.cfg, state.SourceFile, state.Submissions, analysisOptions{
 		IncludeSimilarity:      true,
 		SimilarityIncludeSpans: request.includeSpans(),
-		SimilarityTopK:         request.TopK,
+		SimilarityMinScore:     request.MinScore,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -88,7 +88,7 @@ func (s *server) analyzeAIDetection(w http.ResponseWriter, r *http.Request) {
 	_, detection, err := runAnalysis(s.cfg, state.SourceFile, state.Submissions, analysisOptions{
 		IncludeAIDetection:      true,
 		AIDetectionIncludeSpans: request.includeSpans(),
-		AIDetectionTopK:         request.TopK,
+		AIDetectionMinScore:     request.MinScore,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -128,12 +128,12 @@ func parseAnalyzeRequest(r *http.Request) (analyzeRequest, error) {
 			}
 			request.IncludeSpans = &parsed
 		}
-		if value := strings.TrimSpace(r.FormValue("top_k")); value != "" {
-			parsed, err := strconv.Atoi(value)
+		if value := strings.TrimSpace(r.FormValue("min_score")); value != "" {
+			parsed, err := strconv.ParseFloat(value, 64)
 			if err != nil {
-				return analyzeRequest{}, &httpError{status: 400, msg: "top_k must be an integer"}
+				return analyzeRequest{}, &httpError{status: 400, msg: "min_score must be a number"}
 			}
-			request.TopK = parsed
+			request.MinScore = parsed
 		}
 	}
 
@@ -141,8 +141,8 @@ func parseAnalyzeRequest(r *http.Request) (analyzeRequest, error) {
 	if request.RunID == "" {
 		return analyzeRequest{}, &httpError{status: 400, msg: "missing run_id"}
 	}
-	if request.TopK < 0 {
-		return analyzeRequest{}, &httpError{status: 400, msg: "top_k must be >= 0"}
+	if request.MinScore < 0 || request.MinScore > 100 {
+		return analyzeRequest{}, &httpError{status: 400, msg: "min_score must be between 0 and 100"}
 	}
 	return request, nil
 }
