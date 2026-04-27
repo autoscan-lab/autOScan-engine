@@ -37,9 +37,22 @@ fly deploy
 
 - `GET  /health`
 - `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/S0`)
-- `POST /grade` — accepts a zip, returns JSON results
+- `POST /grade` — accepts a zip, returns JSON results + `run_id`
+- `POST /analyze/similarity` — computes similarity for an existing `run_id`
+- `POST /analyze/ai-detection` — computes AI detection for an existing `run_id`
 
-`/grade` accepts optional form fields:
+`/grade` only performs grading and stores run metadata for follow-up analysis.
 
-- `include_similarity=1` — adds pairwise plagiarism comparison (`similarity` in response)
-- `include_ai_detection=1` — compares each submission against `ai_dictionary.yaml` (`ai_detection` in response)
+`/analyze/similarity` and `/analyze/ai-detection` accept JSON body:
+
+```json
+{
+  "run_id": "9be7e2b7718a5be4634de0db",
+  "include_spans": false,
+  "top_k": 25
+}
+```
+
+- `run_id` is required and must come from a previous `/grade` response.
+- `include_spans` defaults to `false` (summary payloads only).
+- `top_k` is optional; when set, trims the response to the top N entries.

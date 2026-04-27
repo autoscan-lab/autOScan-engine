@@ -12,4 +12,4 @@ batch-and-return works (the executor takes a `nil` progress callback and returns
 2. Concurrency cap or bigger Fly VM — the current `shared-cpu-1x / 1 GB` config is too small once N processes × M scenarios scales up
 
 Once those are handled, add a `include_multi_process=1` form field to
-`/grade`, mirroring `include_similarity` / `include_ai_detection`.
+`/grade`.

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
 const (
@@ -39,6 +41,8 @@ func main() {
 	mux.HandleFunc("GET /health", srv.health)
 	mux.Handle("POST /setup/{assignment}", withSecret(cfg.engineSecret, http.HandlerFunc(srv.setup)))
 	mux.Handle("POST /grade", withSecret(cfg.engineSecret, http.HandlerFunc(srv.grade)))
+	mux.Handle("POST /analyze/similarity", withSecret(cfg.engineSecret, http.HandlerFunc(srv.analyzeSimilarity)))
+	mux.Handle("POST /analyze/ai-detection", withSecret(cfg.engineSecret, http.HandlerFunc(srv.analyzeAIDetection)))
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,
@@ -119,19 +123,39 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	tempDir, err := os.MkdirTemp("", "autoscan-grade-")
+	runID, err := newRunID()
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	defer os.RemoveAll(tempDir)
 
-	suffix := filepath.Ext(header.Filename)
-	if suffix == "" {
-		suffix = ".zip"
+	runBase, err := runBasePath(s.cfg, runID)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
-	archivePath := filepath.Join(tempDir, "upload"+suffix)
-	workspaceDir := filepath.Join(tempDir, "workspace")
+	cleanupRun := true
+	defer func() {
+		if cleanupRun {
+			_ = os.RemoveAll(runBase)
+		}
+	}()
+
+	if err := os.MkdirAll(runBase, 0o755); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	archivePath, err := runUploadPath(s.cfg, runID, filepath.Ext(header.Filename))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	workspaceDir, err := runWorkspacePath(s.cfg, runID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 
 	out, err := os.Create(archivePath)
 	if err != nil {
@@ -149,19 +173,31 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	_ = os.Remove(archivePath)
 
-	opts := gradeOptions{
-		IncludeSimilarity:  formBool(r, "include_similarity"),
-		IncludeAIDetection: formBool(r, "include_ai_detection"),
-	}
-
-	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir, opts)
+	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+	resp.RunID = runID
 
-	log.Printf("processed grading request with %d submissions", len(resp.Results))
+	submissions := make([]domain.Submission, len(resp.Results))
+	for index, result := range resp.Results {
+		submissions[index] = result.Submission
+	}
+	if err := saveRunState(s.cfg, runState{
+		RunID:       runID,
+		SourceFile:  resp.SourceFile,
+		Submissions: submissions,
+	}); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	cleanupRun = false
+
+	log.Printf("processed grading request run_id=%s with %d submissions", runID, len(resp.Results))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -183,17 +219,14 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
-func formBool(r *http.Request, key string) bool {
-	v := strings.ToLower(strings.TrimSpace(r.FormValue(key)))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
-
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(body)
+	if err := enc.Encode(body); err != nil {
+		log.Printf("encoding response failed: %v", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, err error) {

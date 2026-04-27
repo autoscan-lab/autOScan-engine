@@ -49,8 +49,7 @@ type PlagiarismResult struct {
 	ExactMatches      int           `json:"exact_matches"`
 	WindowMatches     int           `json:"window_matches"`
 	WindowUnion       int           `json:"window_union,omitempty"`
-	WindowJaccard     float64       `json:"window_jaccard"`
-	PerFuncSimilarity float64       `json:"per_func_similarity"`
+	SimilarityPercent float64       `json:"similarity_percent"`
 	Flagged           bool          `json:"flagged"`
 	Matches           []WindowMatch `json:"matches,omitempty"`
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 
@@ -12,9 +13,11 @@ func CompareFiles(fileA, fileB string, fpA, fpB domain.FileFingerprint, cfg doma
 	exactMatches := countIntersection(fpA.FunctionHashes, fpB.FunctionHashes)
 	windowMatches := countIntersection(fpA.WindowHashes, fpB.WindowHashes)
 	windowUnion := unionCount(fpA.WindowHashes, fpB.WindowHashes)
+	windowScore := jaccard(windowMatches, windowUnion)
 	perFuncScore := avgBestFunctionSimilarity(fpA.FunctionWindows, fpB.FunctionWindows)
+	combinedScore := combinedSimilarityScore(windowScore, perFuncScore, fpA.FunctionCount, fpB.FunctionCount)
+	similarityPercent := combinedScore * 100
 
-	score := jaccard(windowMatches, windowUnion)
 	matches := extractWindowMatches(fpA, fpB)
 
 	return domain.PlagiarismResult{
@@ -25,11 +28,21 @@ func CompareFiles(fileA, fileB string, fpA, fpB domain.FileFingerprint, cfg doma
 		ExactMatches:      exactMatches,
 		WindowMatches:     windowMatches,
 		WindowUnion:       windowUnion,
-		WindowJaccard:     score,
-		PerFuncSimilarity: perFuncScore,
-		Flagged:           score >= cfg.ScoreThreshold,
+		SimilarityPercent: similarityPercent,
+		Flagged:           combinedScore >= cfg.ScoreThreshold,
 		Matches:           matches,
 	}
+}
+
+func combinedSimilarityScore(windowScore, perFuncScore float64, functionCountA, functionCountB int) float64 {
+	if functionCountA == 0 || functionCountB == 0 {
+		return math.Max(0, math.Min(1, windowScore))
+	}
+
+	// Whole-file overlap is the stronger base signal; per-function overlap
+	// adds structural confidence without dominating the final score.
+	score := (0.65 * windowScore) + (0.35 * perFuncScore)
+	return math.Max(0, math.Min(1, score))
 }
 
 func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch {
@@ -109,7 +122,7 @@ func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string
 	}
 
 	sort.Slice(pairs, func(i, j int) bool {
-		return pairs[i].WindowJaccard > pairs[j].WindowJaccard
+		return pairs[i].SimilarityPercent > pairs[j].SimilarityPercent
 	})
 
 	report.Pairs = pairs

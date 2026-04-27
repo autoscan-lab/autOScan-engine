@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
-	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 // Defaults match conventional code-similarity tuning. Could be made
@@ -21,47 +19,83 @@ var defaultCompareConfig = domain.CompareConfig{
 	ScoreThreshold: 0.7,
 }
 
-// runAnalysis adds similarity and/or AI detection to an existing grading
-// response, reusing the same submissions discovered during the run.
-func runAnalysis(_ context.Context, cfg config, loadedPolicy *policy.Policy, report *domain.RunReport, includeSimilarity, includeAIDetection bool) (*domain.SimilarityReport, *domain.AIDetectionReport, error) {
-	if !includeSimilarity && !includeAIDetection {
+type analysisOptions struct {
+	IncludeSimilarity       bool
+	IncludeAIDetection      bool
+	SimilarityIncludeSpans  bool
+	AIDetectionIncludeSpans bool
+	SimilarityTopK          int
+	AIDetectionTopK         int
+}
+
+// runAnalysis computes similarity and/or AI detection from a run's submissions.
+func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission, opts analysisOptions) (*domain.SimilarityReport, *domain.AIDetectionReport, error) {
+	if !opts.IncludeSimilarity && !opts.IncludeAIDetection {
 		return nil, nil, nil
 	}
 
-	srcFile := loadedPolicy.Compile.SourceFile
-	if srcFile == "" {
+	if sourceFile == "" {
 		return nil, nil, &httpError{status: 400, msg: "policy has no compile.source_file; cannot run similarity/ai detection"}
-	}
-
-	subs := make([]domain.Submission, len(report.Results))
-	for i, r := range report.Results {
-		subs[i] = r.Submission
 	}
 
 	var sim *domain.SimilarityReport
 	var ai *domain.AIDetectionReport
 
-	if includeSimilarity {
-		result, err := engine.ComputeSimilarityForProcess(subs, srcFile, defaultCompareConfig)
+	if opts.IncludeSimilarity {
+		result, err := engine.ComputeSimilarityForProcess(submissions, sourceFile, defaultCompareConfig)
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing similarity: %w", err)
 		}
+		trimSimilarityReport(&result, opts.SimilarityIncludeSpans, opts.SimilarityTopK)
 		sim = &result
 	}
 
-	if includeAIDetection {
+	if opts.IncludeAIDetection {
 		dict, err := loadAIDictionary(cfg)
 		if err != nil {
 			return nil, nil, err
 		}
-		result, err := engine.ComputeAIDetectionForProcess(subs, srcFile, dict, defaultCompareConfig)
+		result, err := engine.ComputeAIDetectionForProcess(submissions, sourceFile, dict, defaultCompareConfig)
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing ai detection: %w", err)
 		}
+		trimAIDetectionReport(&result, opts.AIDetectionIncludeSpans, opts.AIDetectionTopK)
 		ai = &result
 	}
 
 	return sim, ai, nil
+}
+
+func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, topK int) {
+	if report == nil {
+		return
+	}
+	if topK > 0 && len(report.Pairs) > topK {
+		report.Pairs = report.Pairs[:topK]
+	}
+	if includeSpans {
+		return
+	}
+	for index := range report.Pairs {
+		report.Pairs[index].Matches = nil
+	}
+}
+
+func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, topK int) {
+	if report == nil {
+		return
+	}
+	if topK > 0 && len(report.Submissions) > topK {
+		report.Submissions = report.Submissions[:topK]
+	}
+	if includeSpans {
+		return
+	}
+	for submissionIndex := range report.Submissions {
+		for matchIndex := range report.Submissions[submissionIndex].Matches {
+			report.Submissions[submissionIndex].Matches[matchIndex].Spans = nil
+		}
+	}
 }
 
 func loadAIDictionary(cfg config) (*aipkg.Dictionary, error) {
