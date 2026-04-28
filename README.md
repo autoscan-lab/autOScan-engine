@@ -18,8 +18,8 @@
 
 ## Cloud Service
 
-This repo also ships the private cloud grading service used by the WhatsApp
-agent. For service setup, deployment, environment variables, and HTTP API
+This repo also ships the private cloud grading service used by the Web
+Agent. For service setup, deployment, environment variables, and HTTP API
 details, see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 
 ## Features
@@ -32,7 +32,6 @@ details, see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 - Similarity analysis via C token fingerprinting
 - AI-pattern detection against dictionary fingerprints
 - Policy parsing and validation helpers
-- JSON and CSV export helpers for run reports
 - Public Go facade package (`pkg/engine`) for autOScan apps/tools
 - `autoscan-bridge` companion CLI for GUI integrations
 
