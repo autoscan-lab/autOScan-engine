@@ -49,7 +49,6 @@ type MultiProcessScenario struct {
 	Name            string              `yaml:"name"`
 	ProcessArgs     map[string][]string `yaml:"process_args,omitempty"`
 	ProcessInputs   map[string]string   `yaml:"process_inputs,omitempty"`
-	ExpectedExits   map[string]int      `yaml:"expected_exits,omitempty"`
 	ExpectedOutputs map[string]string   `yaml:"expected_outputs,omitempty"`
 }
 
@@ -57,7 +56,6 @@ type TestCase struct {
 	Name               string   `yaml:"name"`
 	Args               []string `yaml:"args"`
 	Input              string   `yaml:"input"`
-	ExpectedExit       *int     `yaml:"expected_exit"`
 	ExpectedOutputFile string   `yaml:"expected_output_file,omitempty"`
 }
 

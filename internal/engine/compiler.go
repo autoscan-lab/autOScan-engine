@@ -130,7 +130,7 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 
 	outputDir := filepath.Join(baseDir, dirName)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return domain.NewCompileResult(false, nil, -1, "", err.Error(), time.Since(start).Milliseconds(), false)
+		return domain.NewCompileResult(false, nil, "", err.Error(), time.Since(start).Milliseconds(), false)
 	}
 
 	// Some assignments access companion source files at runtime (e.g. ftok path inputs).
@@ -141,12 +141,12 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	}
 
 	if e.policy.Compile.SourceFile == "" {
-		return domain.NewCompileResult(false, nil, 1, "", "Policy error: source_file must be set for single-process compilation", time.Since(start).Milliseconds(), false)
+		return domain.NewCompileResult(false, nil, "", "Policy error: source_file must be set for single-process compilation", time.Since(start).Milliseconds(), false)
 	}
 
 	sourceFile := filepath.Join(sub.Path, e.policy.Compile.SourceFile)
 	if _, err := os.Stat(sourceFile); err != nil {
-		return domain.NewCompileResult(false, nil, 1, "", fmt.Sprintf("Source file not found: %s", e.policy.Compile.SourceFile), time.Since(start).Milliseconds(), false)
+		return domain.NewCompileResult(false, nil, "", fmt.Sprintf("Source file not found: %s", e.policy.Compile.SourceFile), time.Since(start).Milliseconds(), false)
 	}
 	sourceFiles := []string{sourceFile}
 	outputName := strings.TrimSuffix(e.policy.Compile.SourceFile, ".c")
@@ -175,15 +175,6 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	duration := time.Since(start).Milliseconds()
 	timedOut := timeoutCtx.Err() == context.DeadlineExceeded
 
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
-	}
-
 	stderrStr := stderr.String()
 	if len(libraryWarnings) > 0 {
 		warnings := strings.Join(libraryWarnings, "\n") + "\n"
@@ -195,7 +186,7 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	}
 
 	fullCmd := append([]string{e.policy.Compile.GCC}, args...)
-	return domain.NewCompileResult(err == nil, fullCmd, exitCode, stdout.String(), stderrStr, duration, timedOut)
+	return domain.NewCompileResult(err == nil, fullCmd, stdout.String(), stderrStr, duration, timedOut)
 }
 
 func (e *CompileEngine) resolveLibraryFiles() ([]string, string, []string) {
@@ -263,7 +254,6 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 	var allStdout, allStderr bytes.Buffer
 	var allCmds []string
 	allOK := true
-	exitCode := 0
 	timedOut := false
 
 	for _, proc := range mp.Executables {
@@ -272,7 +262,6 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		if _, err := os.Stat(sourceFile); err != nil {
 			allStderr.WriteString(fmt.Sprintf("Source file not found: %s\n", proc.SourceFile))
 			allOK = false
-			exitCode = 1
 			continue
 		}
 
@@ -315,13 +304,8 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 
 		if err != nil {
 			allOK = false
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				exitCode = -1
-			}
 		}
 	}
 
-	return domain.NewCompileResult(allOK, allCmds, exitCode, allStdout.String(), allStderr.String(), time.Since(start).Milliseconds(), timedOut)
+	return domain.NewCompileResult(allOK, allCmds, allStdout.String(), allStderr.String(), time.Since(start).Milliseconds(), timedOut)
 }

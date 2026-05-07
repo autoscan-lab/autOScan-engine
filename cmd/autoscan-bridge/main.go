@@ -371,7 +371,7 @@ func runTestCaseCommand(writer *eventWriter, args []string) error {
 	tc := testCases[*testCaseIndex]
 
 	if compileResult.TimedOut || !compileResult.OK {
-		summary.AddCase(domain.NewCompileFailedTestCaseResult(target.ID, *testCaseIndex, tc.Name, compileResult.ExitCode))
+		summary.AddCase(domain.NewCompileFailedTestCaseResult(target.ID, *testCaseIndex, tc.Name))
 		_ = writer.emit(bridgeEvent{
 			Type:     "test_case_complete",
 			TestCase: &summary.Cases[0],

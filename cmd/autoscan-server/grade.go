@@ -124,7 +124,7 @@ func runTestCases(
 
 	if subResult.Compile.TimedOut || !subResult.Compile.OK {
 		for i, tc := range cases {
-			out.Tests.AddCase(domain.NewCompileFailedTestCaseResult("", i, tc.Name, subResult.Compile.ExitCode))
+			out.Tests.AddCase(domain.NewCompileFailedTestCaseResult("", i, tc.Name))
 		}
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
@@ -20,6 +21,20 @@ func unescapeInput(s string) string {
 	s = strings.ReplaceAll(s, "\\t", "\t")
 	s = strings.ReplaceAll(s, "\\r", "\r")
 	return s
+}
+
+func configureProcessGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func killProcessGroup(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err == nil {
+		return nil
+	}
+	return cmd.Process.Kill()
 }
 
 type Executor struct {
@@ -68,7 +83,10 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	binaryDir := filepath.Dir(binaryPath)
 	resolvedArgs := e.resolveTestFilePaths(args)
 
-	cmd := exec.CommandContext(ctx, binaryPath, resolvedArgs...)
+	cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, resolvedArgs)
+	if preflightFailure != nil {
+		return domain.NewExecuteResult(false, "", preflightFailure.Message, 0, false, args, input).WithValgrind(preflightFailure)
+	}
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
@@ -85,20 +103,22 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	duration := time.Since(start)
 	timedOut := ctx.Err() == context.DeadlineExceeded
 
-	exitCode := 0
+	runOK := true
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
+		if _, ok := err.(*exec.ExitError); !ok {
+			runOK = false
+			if stderr.Len() == 0 {
+				stderr.WriteString(err.Error())
+			}
 		}
 	}
 
-	return domain.NewExecuteResult(exitCode >= 0 || err == nil, exitCode, stdout.String(), stderr.String(), duration, timedOut, args, input)
+	return domain.NewExecuteResult(runOK, stdout.String(), stderr.String(), duration, timedOut, args, input).
+		WithValgrind(e.valgrindResultFromLog(valgrindLogPath))
 }
 
 func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, tc policy.TestCase) domain.ExecuteResult {
-	result := e.Execute(ctx, sub, tc.Args, tc.Input).WithTestCase(tc.Name, tc.ExpectedExit)
+	result := e.Execute(ctx, sub, tc.Args, tc.Input).WithTestCase(tc.Name)
 
 	// Compare output if expected output file is configured
 	if tc.ExpectedOutputFile != "" {
@@ -117,6 +137,46 @@ func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, t
 
 func (e *Executor) HasMultiProcess() bool {
 	return e.policy.Run.MultiProcess != nil && e.policy.Run.MultiProcess.Enabled
+}
+
+func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath string, args []string) (*exec.Cmd, string, *domain.ValgrindResult) {
+	valgrindPath, err := exec.LookPath("valgrind")
+	if err != nil {
+		return nil, "", domain.NewValgrindMissingResult("valgrind")
+	}
+
+	logFile, err := os.CreateTemp(binaryDir, "valgrind-*.log")
+	if err != nil {
+		return nil, "", domain.NewValgrindFailureResult(fmt.Sprintf("Could not create Valgrind log file: %v", err))
+	}
+	logPath := logFile.Name()
+	_ = logFile.Close()
+
+	valgrindArgs := []string{
+		"--error-exitcode=97",
+		"--log-file=" + logPath,
+		"--dsymutil=yes",
+		"--track-origins=yes",
+		"--leak-check=full",
+		"--track-fds=yes",
+		"--show-reachable=yes",
+		"-s",
+		binaryPath,
+	}
+	valgrindArgs = append(valgrindArgs, args...)
+
+	return exec.CommandContext(ctx, valgrindPath, valgrindArgs...), logPath, nil
+}
+
+func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult {
+	if logPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return domain.NewValgrindFailureResult(fmt.Sprintf("Could not read Valgrind log file: %v", err))
+	}
+	return domain.ParseValgrindLog(string(data))
 }
 
 // resolveTestFilePaths replaces args that exactly match a declared test file
@@ -173,7 +233,6 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 
 		args := proc.Args
 		input := proc.Input
-		var expectedExit *int
 
 		if scenario != nil {
 			if scenarioArgs, ok := scenario.ProcessArgs[proc.Name]; ok {
@@ -182,20 +241,15 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			if scenarioInput, ok := scenario.ProcessInputs[proc.Name]; ok {
 				input = scenarioInput
 			}
-			if exit, ok := scenario.ExpectedExits[proc.Name]; ok {
-				exitCopy := exit
-				expectedExit = &exitCopy
-			}
 		}
 
 		args = e.resolveTestFilePaths(args)
 
 		procResult := &domain.ProcessResult{
-			Name:         proc.Name,
-			SourceFile:   proc.SourceFile,
-			Running:      true,
-			StartedAt:    time.Now(),
-			ExpectedExit: expectedExit,
+			Name:       proc.Name,
+			SourceFile: proc.SourceFile,
+			Running:    true,
+			StartedAt:  time.Now(),
 		}
 
 		mu.Lock()
@@ -222,12 +276,17 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 
 			if _, err := os.Stat(binaryPath); err != nil {
 				procResult.Running = false
-				procResult.ExitCode = -1
 				procResult.Stderr = fmt.Sprintf("Binary not found: %s (compilation may have failed)", binaryPath)
 				return
 			}
 
-			cmd := exec.CommandContext(ctx, binaryPath, args...)
+			cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
+			if preflightFailure != nil {
+				procResult.Running = false
+				procResult.Stderr = preflightFailure.Message
+				procResult.Valgrind = preflightFailure
+				return
+			}
 			configureProcessGroup(cmd)
 			cmd.Cancel = func() error { return killProcessGroup(cmd) }
 			cmd.Dir = binaryDir
@@ -240,7 +299,6 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 
 			if err := cmd.Start(); err != nil {
 				procResult.Running = false
-				procResult.ExitCode = -1
 				procResult.Stderr = err.Error()
 				return
 			}
@@ -348,19 +406,17 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 				procResult.Killed = true
 			}
 
+			runOK := true
 			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					procResult.ExitCode = exitErr.ExitCode()
-				} else {
-					procResult.ExitCode = -1
+				if _, ok := err.(*exec.ExitError); !ok {
+					runOK = false
+					if procResult.Stderr == "" {
+						procResult.Stderr = err.Error()
+					}
 				}
 			}
 
-			if procResult.ExpectedExit != nil {
-				procResult.Passed = !procResult.Killed && procResult.ExitCode == *procResult.ExpectedExit
-			} else {
-				procResult.Passed = !procResult.Killed
-			}
+			procResult.Passed = runOK && !procResult.Killed
 
 			// Compare output if expected output file is configured for this process
 			if scenario != nil && scenario.ExpectedOutputs != nil {
@@ -376,6 +432,13 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 				}
 			} else {
 				procResult.OutputMatch = domain.OutputMatchNone
+			}
+			if procResult.OutputMatch == domain.OutputMatchFail || procResult.OutputMatch == domain.OutputMatchMissing {
+				procResult.Passed = false
+			}
+			procResult.Valgrind = e.valgrindResultFromLog(valgrindLogPath)
+			if procResult.Valgrind != nil && procResult.Valgrind.Fails() {
+				procResult.Passed = false
 			}
 
 			if onUpdate != nil {

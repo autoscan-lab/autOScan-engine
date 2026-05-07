@@ -22,7 +22,6 @@ type DiffLine struct {
 
 type ExecuteResult struct {
 	OK           bool
-	ExitCode     int
 	Stdout       string
 	Stderr       string
 	Duration     time.Duration
@@ -30,10 +29,10 @@ type ExecuteResult struct {
 	Args         []string
 	Input        string
 	TestCaseName string
-	ExpectedExit *int
 	Passed       bool
 	OutputMatch  OutputMatchStatus
 	OutputDiff   []DiffLine
+	Valgrind     *ValgrindResult
 }
 
 type TestSummary struct {
@@ -47,25 +46,25 @@ type TestSummary struct {
 }
 
 type TestCaseResult struct {
-	SubmissionID   string     `json:"submission_id,omitempty"`
-	Index          int        `json:"index"`
-	Name           string     `json:"name"`
-	Status         string     `json:"status"`
-	ExitCode       int        `json:"exit_code"`
-	DurationMs     int64      `json:"duration_ms"`
-	Message        string     `json:"message,omitempty"`
-	OutputMatch    string     `json:"output_match,omitempty"`
-	Stdout         string     `json:"stdout,omitempty"`
-	Stderr         string     `json:"stderr,omitempty"`
-	ExpectedOutput *string    `json:"expected_output,omitempty"`
-	ActualOutput   *string    `json:"actual_output,omitempty"`
-	DiffLines      []DiffLine `json:"diff_lines,omitempty"`
+	SubmissionID   string          `json:"submission_id,omitempty"`
+	Index          int             `json:"index"`
+	Name           string          `json:"name"`
+	Status         string          `json:"status"`
+	DurationMs     int64           `json:"duration_ms"`
+	Message        string          `json:"message,omitempty"`
+	OutputMatch    string          `json:"output_match,omitempty"`
+	Stdout         string          `json:"stdout,omitempty"`
+	Stderr         string          `json:"stderr,omitempty"`
+	ExpectedOutput *string         `json:"expected_output,omitempty"`
+	ActualOutput   *string         `json:"actual_output,omitempty"`
+	DiffLines      []DiffLine      `json:"diff_lines,omitempty"`
+	Valgrind       *ValgrindResult `json:"valgrind,omitempty"`
 }
 
-func NewExecuteResult(ok bool, exitCode int, stdout, stderr string, duration time.Duration, timedOut bool, args []string, input string) ExecuteResult {
+func NewExecuteResult(ok bool, stdout, stderr string, duration time.Duration, timedOut bool, args []string, input string) ExecuteResult {
 	return ExecuteResult{
-		OK: ok, ExitCode: exitCode, Stdout: stdout, Stderr: stderr,
-		Duration: duration, TimedOut: timedOut, Args: args, Input: input,
+		OK: ok, Stdout: stdout, Stderr: stderr, Duration: duration,
+		TimedOut: timedOut, Args: args, Input: input,
 		Passed: ok && !timedOut,
 	}
 }
@@ -95,13 +94,12 @@ func (s *TestSummary) AddCase(result TestCaseResult) {
 	}
 }
 
-func NewCompileFailedTestCaseResult(submissionID string, index int, name string, exitCode int) TestCaseResult {
+func NewCompileFailedTestCaseResult(submissionID string, index int, name string) TestCaseResult {
 	return TestCaseResult{
 		SubmissionID: submissionID,
 		Index:        index,
 		Name:         name,
 		Status:       "compile_failed",
-		ExitCode:     exitCode,
 		Message:      "Compilation failed; test was not executed.",
 	}
 }
@@ -112,6 +110,10 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 		status = "timeout"
 	} else if !r.Passed {
 		status = "fail"
+	} else if r.OutputMatch == OutputMatchFail {
+		status = "fail"
+	} else if r.Valgrind != nil && r.Valgrind.Fails() {
+		status = "fail"
 	}
 
 	actualOutput := r.Stdout
@@ -120,7 +122,6 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 		Index:          index,
 		Name:           r.TestCaseName,
 		Status:         status,
-		ExitCode:       r.ExitCode,
 		DurationMs:     r.Duration.Milliseconds(),
 		Stdout:         r.Stdout,
 		Stderr:         r.Stderr,
@@ -128,20 +129,29 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 		ExpectedOutput: expectedOutput,
 		ActualOutput:   &actualOutput,
 		DiffLines:      r.OutputDiff,
+		Valgrind:       r.Valgrind,
 	}
 
 	if r.OutputMatch == OutputMatchMissing {
 		result.Message = "Expected output file was not found."
+	} else if r.Valgrind != nil && r.Valgrind.Status == ValgrindStatusMissing {
+		result.Message = r.Valgrind.Message
+	} else if r.Valgrind != nil && r.Valgrind.Fails() {
+		result.Message = "Valgrind reported memory or file descriptor issues."
 	}
 
 	return result
 }
 
-func (r ExecuteResult) WithTestCase(name string, expectedExit *int) ExecuteResult {
+func (r ExecuteResult) WithTestCase(name string) ExecuteResult {
 	r.TestCaseName = name
-	r.ExpectedExit = expectedExit
-	if expectedExit != nil {
-		r.Passed = r.OK && !r.TimedOut && r.ExitCode == *expectedExit
+	return r
+}
+
+func (r ExecuteResult) WithValgrind(valgrind *ValgrindResult) ExecuteResult {
+	r.Valgrind = valgrind
+	if valgrind != nil && valgrind.Fails() {
+		r.Passed = false
 	}
 	return r
 }
@@ -156,21 +166,20 @@ type MultiProcessResult struct {
 }
 
 type ProcessResult struct {
-	Name         string
-	SourceFile   string
-	ExitCode     int
-	Stdout       string
-	Stderr       string
-	Duration     time.Duration
-	TimedOut     bool
-	Killed       bool
-	Running      bool
-	StartedAt    time.Time
-	FinishedAt   time.Time
-	ExpectedExit *int
-	Passed       bool
-	OutputMatch  OutputMatchStatus
-	OutputDiff   []DiffLine
+	Name        string
+	SourceFile  string
+	Stdout      string
+	Stderr      string
+	Duration    time.Duration
+	TimedOut    bool
+	Killed      bool
+	Running     bool
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	Passed      bool
+	OutputMatch OutputMatchStatus
+	OutputDiff  []DiffLine
+	Valgrind    *ValgrindResult
 }
 
 func NewMultiProcessResult() *MultiProcessResult {
