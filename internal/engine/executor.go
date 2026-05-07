@@ -176,7 +176,7 @@ func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult 
 	if err != nil {
 		return domain.NewValgrindFailureResult(fmt.Sprintf("Could not read Valgrind log file: %v", err))
 	}
-	return domain.ParseValgrindLog(string(data))
+	return domain.ParseValgrindLog(string(data), logPath)
 }
 
 // resolveTestFilePaths replaces args that exactly match a declared test file

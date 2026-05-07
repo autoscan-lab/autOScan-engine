@@ -32,6 +32,7 @@ var (
 	valgrindErrorSummaryPattern = regexp.MustCompile(`ERROR SUMMARY:\s+([0-9,]+)\s+errors?`)
 	valgrindLeakPattern         = regexp.MustCompile(`(?m)(definitely lost|indirectly lost|possibly lost|still reachable):\s+([0-9,]+)\s+bytes`)
 	valgrindFDPattern           = regexp.MustCompile(`FILE DESCRIPTORS:\s+([0-9,]+)\s+open(?:\s+\(([0-9,]+)\s+std\))?`)
+	valgrindFDEntryPattern      = regexp.MustCompile(`(?m)Open file descriptor \d+:\s+(.+?)\s*$`)
 )
 
 func NewValgrindMissingResult(tool string) *ValgrindResult {
@@ -48,7 +49,7 @@ func NewValgrindFailureResult(message string) *ValgrindResult {
 	}
 }
 
-func ParseValgrindLog(log string) *ValgrindResult {
+func ParseValgrindLog(log string, logPath string) *ValgrindResult {
 	trimmed := strings.TrimSpace(log)
 	if trimmed == "" {
 		return &ValgrindResult{
@@ -93,6 +94,14 @@ func ParseValgrindLog(log string) *ValgrindResult {
 			result.StandardFileDescriptors = int(parseValgrindNumber(match[2]))
 		} else {
 			result.StandardFileDescriptors = 3
+		}
+		if logPath != "" {
+			for _, entry := range valgrindFDEntryPattern.FindAllStringSubmatch(log, -1) {
+				if len(entry) == 2 && entry[1] == logPath && result.OpenFileDescriptors > 0 {
+					result.OpenFileDescriptors--
+					break
+				}
+			}
 		}
 		if result.OpenFileDescriptors > result.StandardFileDescriptors {
 			result.ExtraOpenFileDescriptors = result.OpenFileDescriptors - result.StandardFileDescriptors
