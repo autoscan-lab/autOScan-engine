@@ -49,13 +49,23 @@ func NewValgrindFailureResult(message string) *ValgrindResult {
 }
 
 func ParseValgrindLog(log string) *ValgrindResult {
-	result := &ValgrindResult{
-		Status: ValgrindStatusPass,
-		Log:    strings.TrimSpace(log),
+	trimmed := strings.TrimSpace(log)
+	if trimmed == "" {
+		return &ValgrindResult{
+			Status:  ValgrindStatusFail,
+			Message: "Valgrind did not produce a report.",
+		}
 	}
 
+	result := &ValgrindResult{
+		Status: ValgrindStatusPass,
+		Log:    trimmed,
+	}
+
+	parsed := false
 	if match := valgrindErrorSummaryPattern.FindStringSubmatch(log); len(match) == 2 {
 		result.ErrorSummary = int(parseValgrindNumber(match[1]))
+		parsed = true
 	}
 
 	for _, match := range valgrindLeakPattern.FindAllStringSubmatch(log, -1) {
@@ -73,9 +83,11 @@ func ParseValgrindLog(log string) *ValgrindResult {
 		case "still reachable":
 			result.StillReachableBytes = bytes
 		}
+		parsed = true
 	}
 
 	if match := valgrindFDPattern.FindStringSubmatch(log); len(match) >= 2 {
+		parsed = true
 		result.OpenFileDescriptors = int(parseValgrindNumber(match[1]))
 		if len(match) >= 3 && match[2] != "" {
 			result.StandardFileDescriptors = int(parseValgrindNumber(match[2]))
@@ -85,6 +97,12 @@ func ParseValgrindLog(log string) *ValgrindResult {
 		if result.OpenFileDescriptors > result.StandardFileDescriptors {
 			result.ExtraOpenFileDescriptors = result.OpenFileDescriptors - result.StandardFileDescriptors
 		}
+	}
+
+	if !parsed {
+		result.Status = ValgrindStatusFail
+		result.Message = "Valgrind report could not be parsed."
+		return result
 	}
 
 	if result.Fails() {
