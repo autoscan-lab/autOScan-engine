@@ -7,10 +7,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
+
+var moodleSuffixPattern = regexp.MustCompile(`_\d+_assignsubmission_file.*$`)
+
+func cleanSubmissionDirName(name string) string {
+	cleaned := moodleSuffixPattern.ReplaceAllString(name, "")
+	if cleaned == "" {
+		return name
+	}
+	return cleaned
+}
 
 // buildAndUploadExport builds a zip of binaryDir (one folder per submission,
 // each containing the compiled binary and a copy of every policy test file —
@@ -119,11 +130,16 @@ func zipBinaryDir(binaryDir string) (string, error) {
 			return err
 		}
 
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) > 0 {
+			parts[0] = cleanSubmissionDirName(parts[0])
+		}
+
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
 			return err
 		}
-		header.Name = filepath.ToSlash(rel)
+		header.Name = strings.Join(parts, "/")
 		header.Method = zip.Deflate
 
 		entry, err := writer.CreateHeader(header)
