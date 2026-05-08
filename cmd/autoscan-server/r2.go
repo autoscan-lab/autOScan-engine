@@ -33,6 +33,18 @@ func newR2Client(_ context.Context, c config) (*r2Client, error) {
 	return &r2Client{client: client, bucket: c.r2BucketName}, nil
 }
 
+// uploadObject uploads a local file to the given R2 key.
+func (r *r2Client) uploadObject(ctx context.Context, key, localPath, contentType string) error {
+	opts := minio.PutObjectOptions{}
+	if contentType != "" {
+		opts.ContentType = contentType
+	}
+	if _, err := r.client.FPutObject(ctx, r.bucket, key, localPath, opts); err != nil {
+		return fmt.Errorf("uploading %s: %w", key, err)
+	}
+	return nil
+}
+
 // downloadObject fetches a single object. Returns false if the key doesn't exist.
 func (r *r2Client) downloadObject(ctx context.Context, key, localPath string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {

@@ -175,7 +175,11 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = os.Remove(archivePath)
 
-	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir)
+	exportKey := ""
+	if prefix := strings.TrimSpace(r.FormValue("export_key_prefix")); prefix != "" {
+		exportKey = strings.TrimRight(prefix, "/") + "/" + runID + "/export.zip"
+	}
+	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir, exportKey)
 	if err != nil {
 		writeError(w, err)
 		return

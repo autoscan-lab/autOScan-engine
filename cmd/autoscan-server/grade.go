@@ -13,14 +13,15 @@ import (
 )
 
 type gradeResponse struct {
-	PolicyName string              `json:"policy_name"`
-	RunID      string              `json:"run_id,omitempty"`
-	Root       string              `json:"root"`
-	SourceFile string              `json:"source_file,omitempty"`
-	StartedAt  string              `json:"started_at"`
-	FinishedAt string              `json:"finished_at"`
-	Summary    domain.SummaryStats `json:"summary"`
-	Results    []submissionResult  `json:"results"`
+	PolicyName     string              `json:"policy_name"`
+	RunID          string              `json:"run_id,omitempty"`
+	Root           string              `json:"root"`
+	SourceFile     string              `json:"source_file,omitempty"`
+	StartedAt      string              `json:"started_at"`
+	FinishedAt     string              `json:"finished_at"`
+	Summary        domain.SummaryStats `json:"summary"`
+	Results        []submissionResult  `json:"results"`
+	ExportUploaded bool                `json:"export_uploaded,omitempty"`
 }
 
 // submissionResult embeds the engine's SubmissionResult so the response
@@ -40,7 +41,7 @@ type sourceFile struct {
 // runGradingPipeline drives discovery → compile → scan → run-all-test-cases
 // against the workspace, producing a single canonical response. Compilation
 // happens once per submission; every test case reuses the resulting binary.
-func runGradingPipeline(ctx context.Context, cfg config, workspaceDir string) (*gradeResponse, error) {
+func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey string) (*gradeResponse, error) {
 	policyPath := filepath.Join(cfg.currentDir, policyFileName)
 
 	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(policyPath, cfg.currentDir)
@@ -86,6 +87,13 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir string) (*
 
 	for i := range resp.Results {
 		resp.Results[i].SourceFiles = readSourceFiles(report.Results[i].Submission)
+	}
+
+	if exportKey != "" {
+		if err := buildAndUploadExport(ctx, cfg, binaryDir, loadedPolicy, exportKey); err != nil {
+			return nil, fmt.Errorf("uploading export: %w", err)
+		}
+		resp.ExportUploaded = true
 	}
 
 	return resp, nil
