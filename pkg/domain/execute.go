@@ -32,6 +32,8 @@ type ExecuteResult struct {
 	Passed       bool
 	OutputMatch  OutputMatchStatus
 	OutputDiff   []DiffLine
+	OutputSource string // "stdout" or "file" when OutputMatch is computed; empty when None
+	ProducedFile string // populated when OutputSource == "file"
 	Valgrind     *ValgrindResult
 }
 
@@ -53,6 +55,8 @@ type TestCaseResult struct {
 	DurationMs     int64           `json:"duration_ms"`
 	Message        string          `json:"message,omitempty"`
 	OutputMatch    string          `json:"output_match,omitempty"`
+	OutputSource   string          `json:"output_source,omitempty"` // "stdout" or "file"
+	ProducedFile   string          `json:"produced_file,omitempty"`
 	Stdout         string          `json:"stdout,omitempty"`
 	Stderr         string          `json:"stderr,omitempty"`
 	ExpectedOutput *string         `json:"expected_output,omitempty"`
@@ -126,6 +130,8 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 		Stdout:         r.Stdout,
 		Stderr:         r.Stderr,
 		OutputMatch:    string(r.OutputMatch),
+		OutputSource:   r.OutputSource,
+		ProducedFile:   r.ProducedFile,
 		ExpectedOutput: expectedOutput,
 		ActualOutput:   &actualOutput,
 		DiffLines:      r.OutputDiff,

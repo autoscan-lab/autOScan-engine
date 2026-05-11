@@ -120,16 +120,37 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, tc policy.TestCase) domain.ExecuteResult {
 	result := e.Execute(ctx, sub, tc.Args, tc.Input).WithTestCase(tc.Name)
 
-	// Compare output if expected output file is configured
-	if tc.ExpectedOutputFile != "" {
-		expectedPath := filepath.Join(e.expectedOutputsDir, tc.ExpectedOutputFile)
-		if expectedData, err := os.ReadFile(expectedPath); err == nil {
-			result.OutputMatch, result.OutputDiff = domain.ComputeOutputDiff(string(expectedData), result.Stdout)
-		} else {
-			result.OutputMatch = domain.OutputMatchMissing
-		}
-	} else {
+	if tc.ExpectedOutputFile == "" {
 		result.OutputMatch = domain.OutputMatchNone
+		return result
+	}
+
+	expectedPath := filepath.Join(e.expectedOutputsDir, tc.ExpectedOutputFile)
+	expectedData, err := os.ReadFile(expectedPath)
+	if err != nil {
+		result.OutputMatch = domain.OutputMatchMissing
+		if tc.ProducedFile != "" {
+			result.OutputSource = "file"
+			result.ProducedFile = tc.ProducedFile
+		} else {
+			result.OutputSource = "stdout"
+		}
+		return result
+	}
+
+	if tc.ProducedFile != "" {
+		result.OutputSource = "file"
+		result.ProducedFile = tc.ProducedFile
+		producedPath := filepath.Join(e.GetSubmissionBinaryDir(sub), tc.ProducedFile)
+		producedData, readErr := os.ReadFile(producedPath)
+		if readErr != nil {
+			result.OutputMatch = domain.OutputMatchMissing
+			return result
+		}
+		result.OutputMatch, result.OutputDiff = domain.ComputeOutputDiff(string(expectedData), string(producedData))
+	} else {
+		result.OutputSource = "stdout"
+		result.OutputMatch, result.OutputDiff = domain.ComputeOutputDiff(string(expectedData), result.Stdout)
 	}
 
 	return result
