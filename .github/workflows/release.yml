@@ -6,14 +6,20 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  dispatch:
+  release:
     runs-on: ubuntu-latest
     env:
       AUTOSCAN_BOT_PAT: ${{ secrets.AUTOSCAN_BOT_PAT }}
     steps:
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+
       - name: Dispatch engine release to autOScan (TUI)
         if: ${{ env.AUTOSCAN_BOT_PAT != '' }}
         uses: peter-evans/repository-dispatch@v3
