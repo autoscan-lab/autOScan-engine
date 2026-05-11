@@ -28,14 +28,13 @@ details, see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 - Submission discovery from root folders
 - Parallel compilation pipeline with worker controls
 - Single-process execution with args/stdin/test-case support
-- Multi-process execution with live process output aggregation
+- Multi-process execution: spawns every configured executable concurrently and returns one buffered result per scenario
 - Always-on Valgrind validation for leaks, reachable memory, memory errors, and open file descriptors
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via C token fingerprinting
 - AI-pattern detection against dictionary fingerprints
 - Policy parsing and validation helpers
 - Public Go facade package (`pkg/engine`) for autOScan apps/tools
-- `autoscan-bridge` companion CLI for GUI integrations
 
 ---
 
@@ -45,13 +44,6 @@ Requires: Go 1.22+, `gcc`, `valgrind`
 
 ```bash
 go build ./...
-```
-
-### Build the Studio Bridge
-
-```bash
-go build -o ./autoscan-bridge ./cmd/autoscan-bridge
-./autoscan-bridge version
 ```
 
 ## Usage
@@ -76,53 +68,20 @@ report, _ := runner.Run(context.Background(), "/path/to/submissions", engine.Run
 _ = report
 ```
 
-### As a Companion CLI
+### Multi-process execution
 
-The bridge is intended for apps and services that need a stable process
-boundary into the engine, including `autOScan Studio`, the cloud grading
-service, and other third-party integrations.
+For policies with `run.multi_process.enabled: true`, use the executor directly:
 
-Check capability flags:
-
-```bash
-./autoscan-bridge capabilities
+```go
+executor := engine.NewExecutorWithOptions(p, binaryDir, false)
+result := executor.ExecuteMultiProcess(ctx, submission)
+// or, with a scenario override:
+result = executor.ExecuteMultiProcessScenario(ctx, submission, scenario)
 ```
 
-Run a full workspace session (compile + scan):
-
-```bash
-./autoscan-bridge run-session \
-  --workspace /path/to/submissions \
-  --policy /path/to/policy.yaml
-```
-
-Run one policy test case for one submission:
-
-```bash
-./autoscan-bridge run-test-case \
-  --workspace /path/to/submissions \
-  --policy /path/to/policy.yaml \
-  --submission-id "submission-id-from-discovery" \
-  --test-case-index 0
-```
-
-The bridge writes newline-delimited JSON events to stdout:
-
-- `started`
-- `discovery_complete`
-- `compile_complete`
-- `scan_complete`
-- `test_case_started`
-- `test_case_complete`
-- `tests_complete`
-- `run_complete`
-- `error`
-
-`capabilities` returns a machine-readable JSON object with:
-
-- `run_session`
-- `run_test_case`
-- `diff_payload`
+Every executable in `run.multi_process.executables` is launched concurrently. The
+call blocks until each process exits (or `ctx` is cancelled) and returns one
+`*domain.MultiProcessResult` with buffered stdout/stderr per process.
 
 ## Package Layout
 
@@ -150,8 +109,7 @@ Engine runtime behavior is compatible with:
 ```
 
 When embedding the engine, set `Policy.ConfigDir` or load with
-`policy.LoadWithGlobalsFromConfigDir`. The bridge exposes the same override
-through `--config-dir`.
+`policy.LoadWithGlobalsFromConfigDir`.
 
 For HTTP service setup, required environment variables, and Fly deployment,
 see [CLOUD_SETUP.md](./CLOUD_SETUP.md).

@@ -26,11 +26,12 @@ type gradeResponse struct {
 
 // submissionResult embeds the engine's SubmissionResult so the response
 // mirrors the engine shape directly: submission, compile, scan, status —
-// then we add server-only fields (source_files, tests).
+// then we add server-only fields (source_files, tests, multi_process).
 type submissionResult struct {
 	domain.SubmissionResult
-	SourceFiles []sourceFile       `json:"source_files,omitempty"`
-	Tests       domain.TestSummary `json:"tests"`
+	SourceFiles  []sourceFile                  `json:"source_files,omitempty"`
+	Tests        domain.TestSummary            `json:"tests"`
+	MultiProcess []*domain.MultiProcessResult  `json:"multi_process,omitempty"`
 }
 
 type sourceFile struct {
@@ -77,8 +78,13 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 	resp := buildBaseResponse(report)
 	resp.SourceFile = loadedPolicy.Compile.SourceFile
 
-	if len(loadedPolicy.Run.TestCases) > 0 {
-		executor := engine.NewExecutorWithOptions(loadedPolicy, binaryDir, false)
+	executor := engine.NewExecutorWithOptions(loadedPolicy, binaryDir, false)
+
+	if executor.HasMultiProcess() {
+		for i := range resp.Results {
+			runMultiProcess(ctx, executor, loadedPolicy, report.Results[i], &resp.Results[i])
+		}
+	} else if len(loadedPolicy.Run.TestCases) > 0 {
 		expected := loadExpectedOutputs(loadedPolicy)
 		for i := range resp.Results {
 			runTestCases(ctx, executor, loadedPolicy, report.Results[i], &resp.Results[i], expected)
@@ -141,6 +147,39 @@ func runTestCases(
 		result := executor.ExecuteTestCase(ctx, subResult.Submission, tc)
 		payload := buildTestCasePayload(i, tc, result, expected)
 		out.Tests.AddCase(payload)
+	}
+}
+
+// runMultiProcess executes a multi-process policy for one submission. If the
+// policy defines TestScenarios, each scenario produces one MultiProcessResult.
+// Otherwise the executables run once with their default args/inputs.
+func runMultiProcess(
+	ctx context.Context,
+	executor *engine.Executor,
+	loadedPolicy *policy.Policy,
+	subResult domain.SubmissionResult,
+	out *submissionResult,
+) {
+	if subResult.Compile.TimedOut || !subResult.Compile.OK {
+		return
+	}
+
+	mp := loadedPolicy.Run.MultiProcess
+	if mp == nil {
+		return
+	}
+
+	if len(mp.TestScenarios) == 0 {
+		if result := executor.ExecuteMultiProcess(ctx, subResult.Submission); result != nil {
+			out.MultiProcess = append(out.MultiProcess, result)
+		}
+		return
+	}
+
+	for _, scenario := range mp.TestScenarios {
+		if result := executor.ExecuteMultiProcessScenario(ctx, subResult.Submission, scenario); result != nil {
+			out.MultiProcess = append(out.MultiProcess, result)
+		}
 	}
 }
 

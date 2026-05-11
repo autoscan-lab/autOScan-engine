@@ -24,9 +24,3 @@ jobs:
 
       - name: Build packages
         run: go build ./...
-
-      - name: Build bridge binary
-        run: go build -o ./autoscan-bridge ./cmd/autoscan-bridge
-
-      - name: Verify bridge version output
-        run: ./autoscan-bridge version

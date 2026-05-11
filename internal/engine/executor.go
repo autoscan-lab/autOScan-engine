@@ -202,18 +202,19 @@ func (e *Executor) resolveTestFilePaths(args []string) []string {
 	return resolved
 }
 
-func (e *Executor) ExecuteMultiProcess(ctx context.Context, sub domain.Submission, onUpdate func(*domain.MultiProcessResult)) *domain.MultiProcessResult {
-	return e.executeMultiProcessWithOverrides(ctx, sub, nil, onUpdate)
+func (e *Executor) ExecuteMultiProcess(ctx context.Context, sub domain.Submission) *domain.MultiProcessResult {
+	return e.executeMultiProcessWithOverrides(ctx, sub, nil)
 }
 
-func (e *Executor) ExecuteMultiProcessScenario(ctx context.Context, sub domain.Submission, scenario policy.MultiProcessScenario, onUpdate func(*domain.MultiProcessResult)) *domain.MultiProcessResult {
-	return e.executeMultiProcessWithOverrides(ctx, sub, &scenario, onUpdate)
+func (e *Executor) ExecuteMultiProcessScenario(ctx context.Context, sub domain.Submission, scenario policy.MultiProcessScenario) *domain.MultiProcessResult {
+	return e.executeMultiProcessWithOverrides(ctx, sub, &scenario)
 }
 
-// executeMultiProcessWithOverrides spawns each executable as a process.
-// Each process gets its own goroutine for lifecycle management, plus goroutines for
-// stdout/stderr streaming. Processes run concurrently and can be cancelled via context.
-func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub domain.Submission, scenario *policy.MultiProcessScenario, onUpdate func(*domain.MultiProcessResult)) *domain.MultiProcessResult {
+// executeMultiProcessWithOverrides runs each configured executable as its own
+// process. Processes run concurrently, with stdout/stderr buffered in memory.
+// The function blocks until every process finishes (or ctx is cancelled) and
+// returns a single MultiProcessResult — there is no live progress callback.
+func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub domain.Submission, scenario *policy.MultiProcessScenario) *domain.MultiProcessResult {
 	config := e.policy.Run.MultiProcess
 	if config == nil || len(config.Executables) == 0 {
 		return nil
@@ -226,11 +227,8 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 	start := time.Now()
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 
 	for _, proc := range config.Executables {
-		wg.Add(1)
-
 		args := proc.Args
 		input := proc.Input
 
@@ -248,206 +246,13 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 		procResult := &domain.ProcessResult{
 			Name:       proc.Name,
 			SourceFile: proc.SourceFile,
-			Running:    true,
-			StartedAt:  time.Now(),
 		}
-
-		mu.Lock()
 		result.AddProcess(proc.Name, procResult)
-		mu.Unlock()
 
+		wg.Add(1)
 		go func(proc policy.ProcessConfig, args []string, input string, procResult *domain.ProcessResult) {
 			defer wg.Done()
-
-			if proc.StartDelayMs > 0 {
-				select {
-				case <-time.After(time.Duration(proc.StartDelayMs) * time.Millisecond):
-				case <-ctx.Done():
-					procResult.Killed = true
-					procResult.Running = false
-					return
-				}
-			}
-
-			procResult.StartedAt = time.Now()
-
-			binaryDir := e.GetSubmissionBinaryDir(sub)
-			binaryPath := filepath.Join(binaryDir, strings.TrimSuffix(proc.SourceFile, ".c"))
-
-			if _, err := os.Stat(binaryPath); err != nil {
-				procResult.Running = false
-				procResult.Stderr = fmt.Sprintf("Binary not found: %s (compilation may have failed)", binaryPath)
-				return
-			}
-
-			cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
-			if preflightFailure != nil {
-				procResult.Running = false
-				procResult.Stderr = preflightFailure.Message
-				procResult.Valgrind = preflightFailure
-				return
-			}
-			configureProcessGroup(cmd)
-			cmd.Cancel = func() error { return killProcessGroup(cmd) }
-			cmd.Dir = binaryDir
-			if input != "" {
-				cmd.Stdin = strings.NewReader(unescapeInput(input))
-			}
-
-			stdoutPipe, _ := cmd.StdoutPipe()
-			stderrPipe, _ := cmd.StderrPipe()
-
-			if err := cmd.Start(); err != nil {
-				procResult.Running = false
-				procResult.Stderr = err.Error()
-				return
-			}
-
-			if onUpdate != nil {
-				mu.Lock()
-				result.TotalDuration = time.Since(start)
-				computeMultiProcessStatus(result)
-				onUpdate(result)
-				mu.Unlock()
-			}
-
-			var stdoutDone, stderrDone sync.WaitGroup
-			stdoutDone.Add(1)
-			stderrDone.Add(1)
-
-			// Cancellation watcher: kills process and closes pipes immediately on cancel
-			go func() {
-				<-ctx.Done()
-				if cmd.Process != nil {
-					_ = killProcessGroup(cmd)
-				}
-				stdoutPipe.Close()
-				stderrPipe.Close()
-			}()
-
-			// Stdout reader: streams output to result in real-time
-			go func() {
-				defer stdoutDone.Done()
-				buf := make([]byte, 1024)
-				for {
-					n, err := stdoutPipe.Read(buf)
-					if n > 0 {
-						mu.Lock()
-						procResult.Stdout += string(buf[:n])
-						result.TotalDuration = time.Since(start)
-						computeMultiProcessStatus(result)
-						mu.Unlock()
-						if onUpdate != nil {
-							mu.Lock()
-							onUpdate(result)
-							mu.Unlock()
-						}
-					}
-					if err != nil {
-						break
-					}
-				}
-			}()
-
-			// Stderr reader: same pattern as stdout
-			go func() {
-				defer stderrDone.Done()
-				buf := make([]byte, 1024)
-				for {
-					n, err := stderrPipe.Read(buf)
-					if n > 0 {
-						mu.Lock()
-						procResult.Stderr += string(buf[:n])
-						result.TotalDuration = time.Since(start)
-						computeMultiProcessStatus(result)
-						mu.Unlock()
-						if onUpdate != nil {
-							mu.Lock()
-							onUpdate(result)
-							mu.Unlock()
-						}
-					}
-					if err != nil {
-						break
-					}
-				}
-			}()
-
-			// Done waiter: waits for readers to finish, then sends exit status to channel.
-			// Runs in goroutine so we can select on it alongside ctx.Done().
-			done := make(chan error, 1)
-			go func() {
-				stdoutDone.Wait()
-				stderrDone.Wait()
-				done <- cmd.Wait()
-			}()
-
-			// Wait for process to finish OR context cancellation
-			var err error
-			select {
-			case err = <-done:
-			case <-ctx.Done():
-				if cmd.Process != nil {
-					_ = killProcessGroup(cmd)
-				}
-				err = <-done
-				procResult.Killed = true
-			}
-
-			procResult.FinishedAt = time.Now()
-			procResult.Duration = procResult.FinishedAt.Sub(procResult.StartedAt)
-			procResult.Running = false
-
-			if ctx.Err() == context.Canceled {
-				procResult.Killed = true
-			}
-			if ctx.Err() == context.DeadlineExceeded {
-				procResult.TimedOut = true
-				procResult.Killed = true
-			}
-
-			runOK := true
-			if err != nil {
-				if _, ok := err.(*exec.ExitError); !ok {
-					runOK = false
-					if procResult.Stderr == "" {
-						procResult.Stderr = err.Error()
-					}
-				}
-			}
-
-			procResult.Passed = runOK && !procResult.Killed
-
-			// Compare output if expected output file is configured for this process
-			if scenario != nil && scenario.ExpectedOutputs != nil {
-				if expectedFile, ok := scenario.ExpectedOutputs[proc.Name]; ok && expectedFile != "" {
-					expectedPath := filepath.Join(e.expectedOutputsDir, expectedFile)
-					if expectedData, err := os.ReadFile(expectedPath); err == nil {
-						procResult.OutputMatch, procResult.OutputDiff = domain.ComputeOutputDiff(string(expectedData), procResult.Stdout)
-					} else {
-						procResult.OutputMatch = domain.OutputMatchMissing
-					}
-				} else {
-					procResult.OutputMatch = domain.OutputMatchNone
-				}
-			} else {
-				procResult.OutputMatch = domain.OutputMatchNone
-			}
-			if procResult.OutputMatch == domain.OutputMatchFail || procResult.OutputMatch == domain.OutputMatchMissing {
-				procResult.Passed = false
-			}
-			procResult.Valgrind = e.valgrindResultFromLog(valgrindLogPath)
-			if procResult.Valgrind != nil && procResult.Valgrind.Fails() {
-				procResult.Passed = false
-			}
-
-			if onUpdate != nil {
-				mu.Lock()
-				result.TotalDuration = time.Since(start)
-				computeMultiProcessStatus(result)
-				onUpdate(result)
-				mu.Unlock()
-			}
+			e.runOneProcess(ctx, sub, proc, args, input, scenario, procResult)
 		}(proc, args, input, procResult)
 	}
 
@@ -455,23 +260,108 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 
 	result.TotalDuration = time.Since(start)
 	computeMultiProcessStatus(result)
-
 	return result
 }
 
+// runOneProcess executes a single process from a multi-process config, buffering
+// its stdout/stderr and recording the outcome on procResult.
+func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, proc policy.ProcessConfig, args []string, input string, scenario *policy.MultiProcessScenario, procResult *domain.ProcessResult) {
+	if proc.StartDelayMs > 0 {
+		select {
+		case <-time.After(time.Duration(proc.StartDelayMs) * time.Millisecond):
+		case <-ctx.Done():
+			procResult.Killed = true
+			return
+		}
+	}
+
+	procResult.StartedAt = time.Now()
+	defer func() {
+		procResult.FinishedAt = time.Now()
+		procResult.Duration = procResult.FinishedAt.Sub(procResult.StartedAt)
+	}()
+
+	binaryDir := e.GetSubmissionBinaryDir(sub)
+	binaryPath := filepath.Join(binaryDir, strings.TrimSuffix(proc.SourceFile, ".c"))
+
+	if _, err := os.Stat(binaryPath); err != nil {
+		procResult.Stderr = fmt.Sprintf("Binary not found: %s (compilation may have failed)", binaryPath)
+		return
+	}
+
+	cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
+	if preflightFailure != nil {
+		procResult.Stderr = preflightFailure.Message
+		procResult.Valgrind = preflightFailure
+		return
+	}
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	cmd.Dir = binaryDir
+	if input != "" {
+		cmd.Stdin = strings.NewReader(unescapeInput(input))
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	procResult.Stdout = stdout.String()
+	procResult.Stderr = stderr.String()
+
+	if ctx.Err() == context.Canceled {
+		procResult.Killed = true
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		procResult.TimedOut = true
+		procResult.Killed = true
+	}
+
+	runOK := true
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			runOK = false
+			if procResult.Stderr == "" {
+				procResult.Stderr = err.Error()
+			}
+		}
+	}
+
+	procResult.Passed = runOK && !procResult.Killed
+
+	if scenario != nil && scenario.ExpectedOutputs != nil {
+		if expectedFile, ok := scenario.ExpectedOutputs[proc.Name]; ok && expectedFile != "" {
+			expectedPath := filepath.Join(e.expectedOutputsDir, expectedFile)
+			if expectedData, err := os.ReadFile(expectedPath); err == nil {
+				procResult.OutputMatch, procResult.OutputDiff = domain.ComputeOutputDiff(string(expectedData), procResult.Stdout)
+			} else {
+				procResult.OutputMatch = domain.OutputMatchMissing
+			}
+		} else {
+			procResult.OutputMatch = domain.OutputMatchNone
+		}
+	} else {
+		procResult.OutputMatch = domain.OutputMatchNone
+	}
+	if procResult.OutputMatch == domain.OutputMatchFail || procResult.OutputMatch == domain.OutputMatchMissing {
+		procResult.Passed = false
+	}
+
+	procResult.Valgrind = e.valgrindResultFromLog(valgrindLogPath)
+	if procResult.Valgrind != nil && procResult.Valgrind.Fails() {
+		procResult.Passed = false
+	}
+}
+
 func computeMultiProcessStatus(result *domain.MultiProcessResult) {
-	allDone := true
 	allPassed := true
 	for _, pr := range result.Processes {
-		if pr.Running {
-			allDone = false
-		}
-		if pr.Killed {
-			allPassed = false
-		} else if !pr.Passed {
+		if pr.Killed || !pr.Passed {
 			allPassed = false
 		}
 	}
-	result.AllCompleted = allDone
+	result.AllCompleted = true
 	result.AllPassed = allPassed
 }

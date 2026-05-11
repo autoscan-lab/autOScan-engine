@@ -157,29 +157,28 @@ func (r ExecuteResult) WithValgrind(valgrind *ValgrindResult) ExecuteResult {
 }
 
 type MultiProcessResult struct {
-	Processes     map[string]*ProcessResult
-	Order         []string
-	TotalDuration time.Duration
-	AllCompleted  bool
-	AllPassed     bool
-	ScenarioName  string
+	Processes     map[string]*ProcessResult `json:"processes"`
+	Order         []string                  `json:"order"`
+	TotalDuration time.Duration             `json:"total_duration_ns"`
+	AllCompleted  bool                      `json:"all_completed"`
+	AllPassed     bool                      `json:"all_passed"`
+	ScenarioName  string                    `json:"scenario_name,omitempty"`
 }
 
 type ProcessResult struct {
-	Name        string
-	SourceFile  string
-	Stdout      string
-	Stderr      string
-	Duration    time.Duration
-	TimedOut    bool
-	Killed      bool
-	Running     bool
-	StartedAt   time.Time
-	FinishedAt  time.Time
-	Passed      bool
-	OutputMatch OutputMatchStatus
-	OutputDiff  []DiffLine
-	Valgrind    *ValgrindResult
+	Name        string            `json:"name"`
+	SourceFile  string            `json:"source_file"`
+	Stdout      string            `json:"stdout,omitempty"`
+	Stderr      string            `json:"stderr,omitempty"`
+	Duration    time.Duration     `json:"duration_ns"`
+	TimedOut    bool              `json:"timed_out,omitempty"`
+	Killed      bool              `json:"killed,omitempty"`
+	StartedAt   time.Time         `json:"started_at"`
+	FinishedAt  time.Time         `json:"finished_at"`
+	Passed      bool              `json:"passed"`
+	OutputMatch OutputMatchStatus `json:"output_match,omitempty"`
+	OutputDiff  []DiffLine        `json:"output_diff,omitempty"`
+	Valgrind    *ValgrindResult   `json:"valgrind,omitempty"`
 }
 
 func NewMultiProcessResult() *MultiProcessResult {
