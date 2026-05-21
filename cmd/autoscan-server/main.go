@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -31,18 +32,27 @@ func (e *httpError) Error() string { return e.msg }
 func main() {
 	cfg := loadConfig()
 
+	if err := cfg.requireSecret(); err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
 	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
 		log.Fatalf("creating data dir: %v", err)
 	}
 
 	srv := &server{cfg: cfg}
 
+	limiter := newRateLimiter(defaultRateLimitPerSecond, defaultRateLimitBurst)
+	protected := func(h http.HandlerFunc) http.Handler {
+		return limitRequests(limiter, withSecret(cfg.engineSecret, h))
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
-	mux.Handle("POST /setup/{assignment}", withSecret(cfg.engineSecret, http.HandlerFunc(srv.setup)))
-	mux.Handle("POST /grade", withSecret(cfg.engineSecret, http.HandlerFunc(srv.grade)))
-	mux.Handle("POST /analyze/similarity", withSecret(cfg.engineSecret, http.HandlerFunc(srv.analyzeSimilarity)))
-	mux.Handle("POST /analyze/ai-detection", withSecret(cfg.engineSecret, http.HandlerFunc(srv.analyzeAIDetection)))
+	mux.Handle("POST /setup/{assignment}", protected(srv.setup))
+	mux.Handle("POST /grade", protected(srv.grade))
+	mux.Handle("POST /analyze/similarity", protected(srv.analyzeSimilarity))
+	mux.Handle("POST /analyze/ai-detection", protected(srv.analyzeAIDetection))
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,
@@ -207,7 +217,8 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 
 func withSecret(secret string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if secret != "" && r.Header.Get("X-Autoscan-Secret") != secret {
+		provided := r.Header.Get("X-Autoscan-Secret")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}

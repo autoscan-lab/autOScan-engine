@@ -7,9 +7,9 @@ your-bucket-name/
   banned.yaml             # global, applied to every assignment
   ai_dictionary.yaml      # global, optional — required only for AI-detection
   assignments/
-    S0/
+    <assignment-name>/    # one folder per assignment
       policy.yml
-    S1/
+    .../
       policy.yml
 ```
 
@@ -36,7 +36,7 @@ fly deploy
 ## Endpoints
 
 - `GET  /health`
-- `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/S0`)
+- `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/<assignment-name>`)
 - `POST /grade` — accepts a zip, returns JSON results + `run_id`
 - `POST /analyze/similarity` — computes similarity for an existing `run_id`
 - `POST /analyze/ai-detection` — computes AI detection for an existing `run_id`

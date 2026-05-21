@@ -29,9 +29,9 @@ type gradeResponse struct {
 // then we add server-only fields (source_files, tests, multi_process).
 type submissionResult struct {
 	domain.SubmissionResult
-	SourceFiles  []sourceFile                  `json:"source_files,omitempty"`
-	Tests        domain.TestSummary            `json:"tests"`
-	MultiProcess []*domain.MultiProcessResult  `json:"multi_process,omitempty"`
+	SourceFiles  []sourceFile                 `json:"source_files,omitempty"`
+	Tests        domain.TestSummary           `json:"tests"`
+	MultiProcess []*domain.MultiProcessResult `json:"multi_process,omitempty"`
 }
 
 type sourceFile struct {

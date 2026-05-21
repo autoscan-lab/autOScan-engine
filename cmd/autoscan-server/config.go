@@ -46,6 +46,13 @@ func loadConfig() config {
 	}
 }
 
+func (c config) requireSecret() error {
+	if c.engineSecret == "" {
+		return fmt.Errorf("missing required environment variable: ENGINE_SECRET")
+	}
+	return nil
+}
+
 func (c config) requireR2() error {
 	missing := []string{}
 	if c.r2AccountID == "" {

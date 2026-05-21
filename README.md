@@ -19,9 +19,9 @@
 
 ## Cloud Service
 
-This repo also ships the private cloud grading service used by the Web
-Agent. For service setup, deployment, environment variables, and HTTP API
-details, see [CLOUD_SETUP.md](./CLOUD_SETUP.md).
+This repo also ships the cloud grading service used by the Web Agent. For
+service setup, deployment, environment variables, and HTTP API details, see
+[CLOUD_SETUP.md](./CLOUD_SETUP.md).
 
 ## Features
 
