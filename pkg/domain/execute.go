@@ -26,6 +26,7 @@ type ExecuteResult struct {
 	Stderr       string
 	Duration     time.Duration
 	TimedOut     bool
+	CrashReason  string
 	Args         []string
 	Input        string
 	TestCaseName string
@@ -112,6 +113,8 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 	status := "pass"
 	if r.TimedOut {
 		status = "timeout"
+	} else if r.CrashReason != "" {
+		status = "crashed"
 	} else if !r.Passed {
 		status = "fail"
 	} else if r.OutputMatch == OutputMatchFail {
@@ -138,7 +141,9 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 		Valgrind:       r.Valgrind,
 	}
 
-	if r.OutputMatch == OutputMatchMissing {
+	if r.CrashReason != "" {
+		result.Message = "Program crashed: " + r.CrashReason
+	} else if r.OutputMatch == OutputMatchMissing {
 		result.Message = "Expected output file was not found."
 	} else if r.Valgrind != nil && r.Valgrind.Status == ValgrindStatusMissing {
 		result.Message = r.Valgrind.Message
@@ -162,6 +167,15 @@ func (r ExecuteResult) WithValgrind(valgrind *ValgrindResult) ExecuteResult {
 	return r
 }
 
+// WithCrash records that the process was killed by a fatal signal.
+func (r ExecuteResult) WithCrash(reason string) ExecuteResult {
+	r.CrashReason = reason
+	if reason != "" {
+		r.Passed = false
+	}
+	return r
+}
+
 type MultiProcessResult struct {
 	Processes     map[string]*ProcessResult `json:"processes"`
 	Order         []string                  `json:"order"`
@@ -179,6 +193,7 @@ type ProcessResult struct {
 	Duration    time.Duration     `json:"duration_ns"`
 	TimedOut    bool              `json:"timed_out,omitempty"`
 	Killed      bool              `json:"killed,omitempty"`
+	CrashReason string            `json:"crash_reason,omitempty"`
 	StartedAt   time.Time         `json:"started_at"`
 	FinishedAt  time.Time         `json:"finished_at"`
 	Passed      bool              `json:"passed"`

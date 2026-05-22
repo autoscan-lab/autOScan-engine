@@ -12,7 +12,7 @@ RUN CGO_ENABLED=1 GOOS=linux \
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc make libc6-dev ca-certificates valgrind \
+    && apt-get install -y --no-install-recommends gcc make libc6-dev ca-certificates valgrind bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

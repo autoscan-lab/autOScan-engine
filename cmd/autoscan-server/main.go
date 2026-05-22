@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -39,6 +40,7 @@ func main() {
 	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
 		log.Fatalf("creating data dir: %v", err)
 	}
+	pruneOldRuns(cfg)
 
 	srv := &server{cfg: cfg}
 
@@ -80,6 +82,9 @@ func main() {
 
 type server struct {
 	cfg config
+	// mu serializes /setup against in-flight /grade and /analyze requests so
+	// the active config is never swapped mid-read.
+	mu sync.RWMutex
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
@@ -87,6 +92,9 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) setup(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	assignment := strings.TrimSpace(r.PathValue("assignment"))
 	if assignment == "" || strings.ContainsAny(assignment, "/\\") {
 		writeError(w, &httpError{status: 400, msg: "invalid assignment name"})
@@ -115,6 +123,9 @@ func (s *server) setup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) grade(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if err := ensureActiveConfig(s.cfg); err != nil {
 		writeError(w, err)
 		return
@@ -210,6 +221,7 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cleanupRun = false
+	pruneOldRuns(s.cfg)
 
 	log.Printf("processed grading request run_id=%s with %d submissions", runID, len(resp.Results))
 	writeJSON(w, http.StatusOK, resp)
@@ -251,5 +263,5 @@ func writeError(w http.ResponseWriter, err error) {
 		return
 	}
 	log.Printf("internal error: %v", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": "internal server error"})
 }

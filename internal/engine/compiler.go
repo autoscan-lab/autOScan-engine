@@ -162,10 +162,19 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	timeoutCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, e.policy.Compile.GCC, args...)
+	gccCmdline := append([]string{e.policy.Compile.GCC}, args...)
+	cleanup := func() {}
+	if sandboxAvailable() {
+		spec := sandboxSpec{workDir: outputDir, readOnly: existingPaths(sub.Path, libDir)}
+		gccCmdline, cleanup = sandboxCommand(spec, gccCmdline)
+	}
+	defer cleanup()
+
+	cmd := exec.CommandContext(timeoutCtx, gccCmdline[0], gccCmdline[1:]...)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = sub.Path
+	cmd.Env = minimalEnv(sub.Path)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -274,10 +283,17 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		}
 
 		timeoutCtx, cancel := context.WithTimeout(ctx, e.timeout)
-		cmd := exec.CommandContext(timeoutCtx, e.policy.Compile.GCC, args...)
+		gccCmdline := append([]string{e.policy.Compile.GCC}, args...)
+		cleanup := func() {}
+		if sandboxAvailable() {
+			spec := sandboxSpec{workDir: outputDir, readOnly: existingPaths(sub.Path, libDir)}
+			gccCmdline, cleanup = sandboxCommand(spec, gccCmdline)
+		}
+		cmd := exec.CommandContext(timeoutCtx, gccCmdline[0], gccCmdline[1:]...)
 		configureProcessGroup(cmd)
 		cmd.Cancel = func() error { return killProcessGroup(cmd) }
 		cmd.Dir = sub.Path
+		cmd.Env = minimalEnv(sub.Path)
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -288,6 +304,7 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 			timedOut = true
 		}
 		cancel()
+		cleanup()
 
 		fullCmd := append([]string{e.policy.Compile.GCC}, args...)
 		allCmds = append(allCmds, fullCmd...)

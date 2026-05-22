@@ -9,6 +9,7 @@
   <a href="#"><img src="https://img.shields.io/badge/type-engine-1f6feb?style=flat" /></a>
   <a href="#"><img src="https://img.shields.io/badge/compiler-gcc-A42E2B?style=flat" /></a>
   <a href="#"><img src="https://img.shields.io/badge/runtime-valgrind-5c6bc0?style=flat" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/sandbox-bubblewrap-2ea44f?style=flat" /></a>
 </p>
 
 <p align="center">
@@ -30,6 +31,7 @@ service setup, deployment, environment variables, and HTTP API details, see
 - Single-process execution with args/stdin/test-case support
 - Multi-process execution: spawns every configured executable concurrently and returns one buffered result per scenario
 - Always-on Valgrind validation for leaks, reachable memory, memory errors, and open file descriptors
+- Sandboxed environment for grading untrusted submissions
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via C token fingerprinting
 - AI-pattern detection against dictionary fingerprints
@@ -93,6 +95,25 @@ autOScan-engine/
 ├── pkg/ai/                # AI dictionary parsing/validation
 └── internal/engine/       # Engine internals
 ```
+
+---
+
+## Sandboxing
+
+Student submissions are untrusted code, so the engine compiles and runs each one
+inside an isolated sandbox.
+
+```mermaid
+flowchart LR
+    submission[Student submission] --> sandbox
+    sandbox --> result[Graded result]
+    subgraph sandbox["Sandbox"]
+        limits["No network<br/>No host files or secrets<br/>Memory · CPU · time capped"]
+    end
+```
+
+A submission that crashes or runs out of memory is reported as `crashed`, not
+passed.
 
 ---
 

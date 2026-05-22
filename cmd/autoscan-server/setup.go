@@ -13,6 +13,11 @@ import (
 
 var globalFiles = []string{"banned.yaml", "ai_dictionary.yaml"}
 
+const (
+	maxZipEntries = 10000
+	maxZipBytes   = 1 << 30 // 1 GiB decompressed
+)
+
 type setupResult struct {
 	Assignment      string `json:"assignment"`
 	FilesDownloaded int    `json:"files_downloaded"`
@@ -141,6 +146,11 @@ func extractZip(archivePath, targetDir string) error {
 	}
 	defer zr.Close()
 
+	if len(zr.File) > maxZipEntries {
+		return &httpError{status: 400, msg: "zip archive has too many entries"}
+	}
+	budget := int64(maxZipBytes)
+
 	for _, f := range zr.File {
 		dest, err := filepath.Abs(filepath.Join(targetDir, f.Name))
 		if err != nil {
@@ -161,14 +171,14 @@ func extractZip(archivePath, targetDir string) error {
 			return err
 		}
 
-		if err := writeZipEntry(f, dest); err != nil {
+		if err := writeZipEntry(f, dest, &budget); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeZipEntry(f *zip.File, dest string) error {
+func writeZipEntry(f *zip.File, dest string, budget *int64) error {
 	rc, err := f.Open()
 	if err != nil {
 		return err
@@ -185,6 +195,14 @@ func writeZipEntry(f *zip.File, dest string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, rc)
-	return err
+	// Cap total decompressed bytes to defend against zip bombs.
+	n, err := io.Copy(out, io.LimitReader(rc, *budget+1))
+	if err != nil {
+		return err
+	}
+	if n > *budget {
+		return &httpError{status: 400, msg: "zip archive is too large when decompressed"}
+	}
+	*budget -= n
+	return nil
 }

@@ -16,6 +16,56 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
+// DefaultExecTimeout caps how long a single submission process may run.
+const DefaultExecTimeout = 10 * time.Second
+
+// minimalEnv returns a scrubbed environment for child processes, so untrusted
+// submission code cannot inherit the server's secrets.
+func minimalEnv(homeDir string) []string {
+	return []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=" + homeDir,
+		"LANG=C",
+		"LC_ALL=C",
+	}
+}
+
+// maxCapturedOutput caps buffered stdout/stderr per process so a submission
+// cannot exhaust server memory by printing without bound.
+const maxCapturedOutput = 1 << 20
+
+// cappedBuffer collects output up to limit bytes, then drops the rest.
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := c.limit - c.buf.Len(); room > 0 {
+		if len(p) > room {
+			c.buf.Write(p[:room])
+			c.truncated = true
+		} else {
+			c.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		c.truncated = true
+	}
+	return len(p), nil // report a full write so the process is not killed
+}
+
+func (c *cappedBuffer) WriteString(s string) (int, error) { return c.Write([]byte(s)) }
+
+func (c *cappedBuffer) Len() int { return c.buf.Len() }
+
+func (c *cappedBuffer) String() string {
+	if c.truncated {
+		return c.buf.String() + "\n... [output truncated]"
+	}
+	return c.buf.String()
+}
+
 func unescapeInput(s string) string {
 	s = strings.ReplaceAll(s, "\\n", "\n")
 	s = strings.ReplaceAll(s, "\\t", "\t")
@@ -35,6 +85,40 @@ func killProcessGroup(cmd *exec.Cmd) error {
 		return nil
 	}
 	return cmd.Process.Kill()
+}
+
+// crashReasonFromExit describes how a process was killed by a fatal signal, or
+// returns "" if it was not. A timeout kill is not treated as a crash. The
+// sandbox chain reports signals as a 128+signal exit code.
+func crashReasonFromExit(err error, timedOut bool) string {
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return ""
+	}
+	sig := 0
+	if code := exitErr.ExitCode(); code > 128 {
+		sig = code - 128
+	} else if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		sig = int(ws.Signal())
+	}
+	switch syscall.Signal(sig) {
+	case syscall.SIGSEGV:
+		return "segmentation fault"
+	case syscall.SIGABRT:
+		return "aborted"
+	case syscall.SIGFPE:
+		return "arithmetic exception"
+	case syscall.SIGBUS:
+		return "bus error"
+	case syscall.SIGILL:
+		return "illegal instruction"
+	case syscall.SIGKILL:
+		if timedOut {
+			return ""
+		}
+		return "out of memory"
+	}
+	return ""
 }
 
 type Executor struct {
@@ -83,20 +167,26 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	binaryDir := filepath.Dir(binaryPath)
 	resolvedArgs := e.resolveTestFilePaths(args)
 
-	cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, resolvedArgs)
+	ctx, cancel := context.WithTimeout(ctx, DefaultExecTimeout)
+	defer cancel()
+
+	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, resolvedArgs)
+	defer cleanup()
 	if preflightFailure != nil {
 		return domain.NewExecuteResult(false, "", preflightFailure.Message, 0, false, args, input).WithValgrind(preflightFailure)
 	}
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
+	cmd.Env = minimalEnv(binaryDir)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(unescapeInput(input))
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &cappedBuffer{limit: maxCapturedOutput}
+	stderr := &cappedBuffer{limit: maxCapturedOutput}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	start := time.Now()
 	err := cmd.Run()
@@ -114,7 +204,8 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	}
 
 	return domain.NewExecuteResult(runOK, stdout.String(), stderr.String(), duration, timedOut, args, input).
-		WithValgrind(e.valgrindResultFromLog(valgrindLogPath))
+		WithValgrind(e.valgrindResultFromLog(valgrindLogPath)).
+		WithCrash(crashReasonFromExit(err, timedOut))
 }
 
 func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, tc policy.TestCase) domain.ExecuteResult {
@@ -160,15 +251,15 @@ func (e *Executor) HasMultiProcess() bool {
 	return e.policy.Run.MultiProcess != nil && e.policy.Run.MultiProcess.Enabled
 }
 
-func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath string, args []string) (*exec.Cmd, string, *domain.ValgrindResult) {
+func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath string, args []string) (*exec.Cmd, string, func(), *domain.ValgrindResult) {
 	valgrindPath, err := exec.LookPath("valgrind")
 	if err != nil {
-		return nil, "", domain.NewValgrindMissingResult("valgrind")
+		return nil, "", func() {}, domain.NewValgrindMissingResult("valgrind")
 	}
 
 	logFile, err := os.CreateTemp(binaryDir, "valgrind-*.log")
 	if err != nil {
-		return nil, "", domain.NewValgrindFailureResult(fmt.Sprintf("Could not create Valgrind log file: %v", err))
+		return nil, "", func() {}, domain.NewValgrindFailureResult(fmt.Sprintf("Could not create Valgrind log file: %v", err))
 	}
 	logPath := logFile.Name()
 	_ = logFile.Close()
@@ -186,7 +277,14 @@ func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath s
 	}
 	valgrindArgs = append(valgrindArgs, args...)
 
-	return exec.CommandContext(ctx, valgrindPath, valgrindArgs...), logPath, nil
+	cmdline := append([]string{valgrindPath}, valgrindArgs...)
+	cleanup := func() {}
+	if sandboxAvailable() {
+		spec := sandboxSpec{workDir: binaryDir, readOnly: existingPaths(e.testFilesDir)}
+		cmdline, cleanup = sandboxCommand(spec, cmdline)
+	}
+
+	return exec.CommandContext(ctx, cmdline[0], cmdline[1:]...), logPath, cleanup, nil
 }
 
 func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult {
@@ -310,7 +408,11 @@ func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, pro
 		return
 	}
 
-	cmd, valgrindLogPath, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
+	ctx, cancel := context.WithTimeout(ctx, DefaultExecTimeout)
+	defer cancel()
+
+	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
+	defer cleanup()
 	if preflightFailure != nil {
 		procResult.Stderr = preflightFailure.Message
 		procResult.Valgrind = preflightFailure
@@ -319,13 +421,15 @@ func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, pro
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
+	cmd.Env = minimalEnv(binaryDir)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(unescapeInput(input))
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &cappedBuffer{limit: maxCapturedOutput}
+	stderr := &cappedBuffer{limit: maxCapturedOutput}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
 
@@ -350,7 +454,8 @@ func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, pro
 		}
 	}
 
-	procResult.Passed = runOK && !procResult.Killed
+	procResult.CrashReason = crashReasonFromExit(err, procResult.TimedOut)
+	procResult.Passed = runOK && !procResult.Killed && procResult.CrashReason == ""
 
 	if scenario != nil && scenario.ExpectedOutputs != nil {
 		if expectedFile, ok := scenario.ExpectedOutputs[proc.Name]; ok && expectedFile != "" {

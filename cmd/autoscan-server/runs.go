@@ -117,6 +117,29 @@ func runBasePath(cfg config, runID string) (string, error) {
 	return filepath.Join(cfg.dataDir, runsDirName, normalizedRunID), nil
 }
 
+const runRetention = 7 * 24 * time.Hour
+
+// pruneOldRuns deletes run directories older than runRetention so the data
+// volume does not fill over time.
+func pruneOldRuns(cfg config) {
+	runsDir := filepath.Join(cfg.dataDir, runsDirName)
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-runRetention)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(runsDir, entry.Name()))
+	}
+}
+
 func normalizeRunID(runID string) (string, error) {
 	normalized := strings.TrimSpace(runID)
 	if normalized == "" {

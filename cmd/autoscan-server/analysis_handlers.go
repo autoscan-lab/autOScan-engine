@@ -39,6 +39,9 @@ type aiDetectionAnalysisResponse struct {
 }
 
 func (s *server) analyzeSimilarity(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	request, err := parseAnalyzeRequest(r)
 	if err != nil {
 		writeError(w, err)
@@ -73,6 +76,9 @@ func (s *server) analyzeSimilarity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) analyzeAIDetection(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	request, err := parseAnalyzeRequest(r)
 	if err != nil {
 		writeError(w, err)
