@@ -103,14 +103,7 @@ autOScan-engine/
 Student submissions are untrusted code, so the engine compiles and runs each one
 inside an isolated sandbox.
 
-```mermaid
-flowchart LR
-    submission[Student submission] --> sandbox
-    sandbox --> result[Graded result]
-    subgraph sandbox["Sandbox"]
-        limits["No network<br/>No host files or secrets<br/>Memory · CPU · time capped"]
-    end
-```
+![Sandbox](docs/sandbox.png)
 
 A submission that crashes or runs out of memory is reported as `crashed`, not
 passed.

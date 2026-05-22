@@ -1,0 +1,6 @@
+flowchart LR
+    submission[Submission] --> sandbox
+    sandbox --> result[Graded result]
+    subgraph sandbox["Sandbox"]
+        limits["No network<br/>No host files or secrets<br/>Memory and time capped"]
+    end
