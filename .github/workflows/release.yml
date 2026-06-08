@@ -20,12 +20,12 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Dispatch engine release to autOScan (TUI)
+      - name: Dispatch engine release to autOScan-tui
         if: ${{ env.AUTOSCAN_BOT_PAT != '' }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ env.AUTOSCAN_BOT_PAT }}
-          repository: autoscan-lab/autOScan
+          repository: autoscan-lab/autOScan-tui
           event-type: engine_release
           client-payload: '{"engine_tag":"${{ github.ref_name }}"}'
 
