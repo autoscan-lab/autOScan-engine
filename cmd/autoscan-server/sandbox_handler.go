@@ -53,12 +53,11 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{status: 400, msg: "invalid multipart form: " + err.Error()})
 		return
 	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, &httpError{status: 400, msg: "missing 'file' upload field"})
+	r2Key := strings.TrimSpace(r.FormValue("r2_key"))
+	if r2Key == "" {
+		writeError(w, &httpError{status: 400, msg: "missing 'r2_key' field"})
 		return
 	}
-	defer file.Close()
 
 	workDir, err := os.MkdirTemp(s.cfg.dataDir, "sandbox-")
 	if err != nil {
@@ -67,9 +66,19 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(workDir)
 
-	archivePath := filepath.Join(workDir, "upload"+filepath.Ext(header.Filename))
-	if err := saveSandboxUpload(file, archivePath); err != nil {
+	r2, err := newR2Client(r.Context(), s.cfg)
+	if err != nil {
 		writeError(w, err)
+		return
+	}
+	archivePath := filepath.Join(workDir, "upload"+filepath.Ext(r2Key))
+	found, err := r2.downloadObject(r.Context(), r2Key, archivePath)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, &httpError{status: 404, msg: "r2_key not found: " + r2Key})
 		return
 	}
 
@@ -121,16 +130,6 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 			FlaggedSubmissions: countFlaggedAISubmissions(&ai),
 		},
 	})
-}
-
-func saveSandboxUpload(src io.Reader, dest string) error {
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, io.LimitReader(src, maxUploadBytes))
-	return err
 }
 
 // sandboxAIDictionary downloads the global ai_dictionary.yaml from R2 and loads

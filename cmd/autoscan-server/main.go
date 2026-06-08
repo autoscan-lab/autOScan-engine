@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -138,12 +137,11 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, &httpError{status: 400, msg: "missing 'file' upload field"})
+	r2Key := strings.TrimSpace(r.FormValue("r2_key"))
+	if r2Key == "" {
+		writeError(w, &httpError{status: 400, msg: "missing 'r2_key' field"})
 		return
 	}
-	defer file.Close()
 
 	runID, err := newRunID()
 	if err != nil {
@@ -168,7 +166,7 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	archivePath, err := runUploadPath(s.cfg, runID, filepath.Ext(header.Filename))
+	archivePath, err := runUploadPath(s.cfg, runID, filepath.Ext(r2Key))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -179,17 +177,20 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := os.Create(archivePath)
+	r2, err := newR2Client(r.Context(), s.cfg)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if _, err := io.Copy(out, file); err != nil {
-		out.Close()
+	found, err := r2.downloadObject(r.Context(), r2Key, archivePath)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
-	out.Close()
+	if !found {
+		writeError(w, &httpError{status: 404, msg: "r2_key not found: " + r2Key})
+		return
+	}
 
 	if err := extractZip(archivePath, workspaceDir); err != nil {
 		writeError(w, err)
