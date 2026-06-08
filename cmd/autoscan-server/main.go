@@ -55,6 +55,7 @@ func main() {
 	mux.Handle("POST /grade", protected(srv.grade))
 	mux.Handle("POST /analyze/similarity", protected(srv.analyzeSimilarity))
 	mux.Handle("POST /analyze/ai-detection", protected(srv.analyzeAIDetection))
+	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,
