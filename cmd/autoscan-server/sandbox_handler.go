@@ -258,7 +258,13 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 		if d.IsDir() || !isSubmissionArchive(path) {
 			return nil
 		}
+		// Identify a submission by its containing directory (one dir per
+		// student); fall back to the archive name only when it sits at the root.
 		id := submissionID(path)
+		if rel, relErr := filepath.Rel(srcDir, filepath.Dir(path)); relErr == nil &&
+			rel != "." && rel != "" {
+			id = filepath.ToSlash(rel)
+		}
 		seen[id]++
 		if seen[id] > 1 {
 			id = fmt.Sprintf("%s-%d", id, seen[id])
