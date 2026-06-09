@@ -41,8 +41,11 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 	var sim *domain.SimilarityReport
 	var ai *domain.AIDetectionReport
 
+	// Fingerprint each submission once and share it across similarity + AI.
+	prints := engine.FingerprintSubmissions(submissions, sourceFile, defaultCompareConfig)
+
 	if opts.IncludeSimilarity {
-		result, err := engine.ComputeSimilarityForProcess(submissions, sourceFile, defaultCompareConfig)
+		result, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sourceFile, defaultCompareConfig)
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing similarity: %w", err)
 		}
@@ -55,7 +58,7 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 		if err != nil {
 			return nil, nil, err
 		}
-		result, err := engine.ComputeAIDetectionForProcess(submissions, sourceFile, dict, defaultCompareConfig)
+		result, err := engine.ComputeAIDetectionFromFingerprints(submissions, prints, sourceFile, dict, defaultCompareConfig)
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing ai detection: %w", err)
 		}

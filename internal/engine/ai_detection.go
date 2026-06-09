@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 
 	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
@@ -16,6 +15,14 @@ type dictionaryFingerprint struct {
 
 // ComputeAIDetectionForProcess compares each submission source file against dictionary fingerprints.
 func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
+	prints := FingerprintSubmissions(submissions, srcFile, cfg)
+	return ComputeAIDetectionFromFingerprints(submissions, prints, srcFile, dict, cfg)
+}
+
+// ComputeAIDetectionFromFingerprints scores each submission against the AI
+// dictionary using a precomputed set of fingerprints (index-aligned with
+// submissions).
+func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
 	report := domain.AIDetectionReport{
 		SourceFile: srcFile,
 	}
@@ -33,18 +40,18 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 		return report, fmt.Errorf("ai dictionary has no usable entries")
 	}
 
-	results := make([]domain.AISubmissionResult, 0, len(submissions))
-	for _, sub := range submissions {
-		filePath := filepath.Join(sub.Path, srcFile)
-		fp, err := FingerprintFile(filePath, cfg)
-		if err != nil {
-			results = append(results, domain.AISubmissionResult{
+	results := make([]domain.AISubmissionResult, len(submissions))
+	parallelForEach(len(submissions), func(i int) {
+		sub := submissions[i]
+		if prints[i].Err != nil {
+			results[i] = domain.AISubmissionResult{
 				SubmissionID: sub.ID,
 				SourceFile:   srcFile,
-				ParseError:   err.Error(),
-			})
-			continue
+				ParseError:   prints[i].Err.Error(),
+			}
+			return
 		}
+		fp := prints[i].FP
 
 		matches := compareSubmissionToDictionary(fp, dictFPs, cfg)
 		bestScore := 0.0
@@ -58,7 +65,7 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 			}
 		}
 
-		results = append(results, domain.AISubmissionResult{
+		results[i] = domain.AISubmissionResult{
 			SubmissionID:  sub.ID,
 			SourceFile:    srcFile,
 			FunctionCount: fp.FunctionCount,
@@ -66,8 +73,8 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 			BestScore:     bestScore,
 			Flagged:       flagged,
 			Matches:       matches,
-		})
-	}
+		}
+	})
 
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Flagged != results[j].Flagged {
@@ -84,26 +91,34 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 }
 
 func fingerprintDictionary(dict *aipkg.Dictionary, cfg domain.CompareConfig) ([]dictionaryFingerprint, []domain.AIDictionaryEntryError) {
-	items := make([]dictionaryFingerprint, 0, len(dict.Entries))
-	errs := make([]domain.AIDictionaryEntryError, 0)
-
-	for _, e := range dict.Entries {
+	type entrySlot struct {
+		item *dictionaryFingerprint
+		err  *domain.AIDictionaryEntryError
+	}
+	slots := make([]entrySlot, len(dict.Entries))
+	parallelForEach(len(dict.Entries), func(i int) {
+		e := dict.Entries[i]
 		fp, err := fingerprintContent([]byte(e.Code), cfg)
 		if err != nil {
-			errs = append(errs, domain.AIDictionaryEntryError{
-				EntryID: e.ID,
-				Err:     err.Error(),
-			})
-			continue
+			slots[i] = entrySlot{err: &domain.AIDictionaryEntryError{EntryID: e.ID, Err: err.Error()}}
+			return
 		}
 		if len(fp.WindowHashes) == 0 {
-			errs = append(errs, domain.AIDictionaryEntryError{
-				EntryID: e.ID,
-				Err:     "entry produced no window fingerprints",
-			})
-			continue
+			slots[i] = entrySlot{err: &domain.AIDictionaryEntryError{EntryID: e.ID, Err: "entry produced no window fingerprints"}}
+			return
 		}
-		items = append(items, dictionaryFingerprint{entry: e, fp: fp})
+		slots[i] = entrySlot{item: &dictionaryFingerprint{entry: e, fp: fp}}
+	})
+
+	items := make([]dictionaryFingerprint, 0, len(dict.Entries))
+	errs := make([]domain.AIDictionaryEntryError, 0)
+	for i := range slots {
+		if slots[i].item != nil {
+			items = append(items, *slots[i].item)
+		}
+		if slots[i].err != nil {
+			errs = append(errs, *slots[i].err)
+		}
 	}
 
 	return items, errs

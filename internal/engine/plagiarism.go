@@ -72,7 +72,34 @@ func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch 
 	return result
 }
 
+// SubmissionFingerprint is one submission's fingerprint, or the error that
+// prevented it. Computing these once lets similarity and AI detection share a
+// single fingerprint pass instead of each fingerprinting every submission.
+type SubmissionFingerprint struct {
+	FP  domain.FileFingerprint
+	Err error
+}
+
+// FingerprintSubmissions fingerprints each submission's srcFile once, in
+// parallel. The returned slice is index-aligned with submissions.
+func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) []SubmissionFingerprint {
+	prints := make([]SubmissionFingerprint, len(submissions))
+	parallelForEach(len(submissions), func(i int) {
+		path := filepath.Join(submissions[i].Path, srcFile)
+		fp, err := FingerprintFile(path, cfg)
+		prints[i] = SubmissionFingerprint{FP: fp, Err: err}
+	})
+	return prints
+}
+
 func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
+	prints := FingerprintSubmissions(submissions, srcFile, cfg)
+	return ComputeSimilarityFromFingerprints(submissions, prints, srcFile, cfg)
+}
+
+// ComputeSimilarityFromFingerprints runs the pairwise comparison over a
+// precomputed set of fingerprints (index-aligned with submissions).
+func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
 	report := domain.SimilarityReport{SourceFile: srcFile}
 
 	type fingerprintItem struct {
@@ -82,15 +109,12 @@ func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string
 
 	var fps []fingerprintItem
 	var failures int
-
-	for i, sub := range submissions {
-		path := filepath.Join(sub.Path, srcFile)
-		fp, err := FingerprintFile(path, cfg)
-		if err != nil {
+	for i := range prints {
+		if prints[i].Err == nil {
+			fps = append(fps, fingerprintItem{idx: i, fp: prints[i].FP})
+		} else {
 			failures++
-			continue
 		}
-		fps = append(fps, fingerprintItem{idx: i, fp: fp})
 	}
 
 	if len(fps) < 2 {
@@ -101,25 +125,31 @@ func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string
 		return report, nil
 	}
 
-	var pairs []domain.SimilarityPairResult
+	type pairIndex struct{ i, j int }
+	jobs := make([]pairIndex, 0, len(fps)*(len(fps)-1)/2)
 	for i := 0; i < len(fps); i++ {
 		for j := i + 1; j < len(fps); j++ {
-			a := fps[i]
-			b := fps[j]
-			res := CompareFiles(
-				filepath.Base(submissions[a.idx].ID),
-				filepath.Base(submissions[b.idx].ID),
-				a.fp,
-				b.fp,
-				cfg,
-			)
-			pairs = append(pairs, domain.SimilarityPairResult{
-				A:                submissions[a.idx].ID,
-				B:                submissions[b.idx].ID,
-				PlagiarismResult: res,
-			})
+			jobs = append(jobs, pairIndex{i: i, j: j})
 		}
 	}
+
+	pairs := make([]domain.SimilarityPairResult, len(jobs))
+	parallelForEach(len(jobs), func(k int) {
+		a := fps[jobs[k].i]
+		b := fps[jobs[k].j]
+		res := CompareFiles(
+			filepath.Base(submissions[a.idx].ID),
+			filepath.Base(submissions[b.idx].ID),
+			a.fp,
+			b.fp,
+			cfg,
+		)
+		pairs[k] = domain.SimilarityPairResult{
+			A:                submissions[a.idx].ID,
+			B:                submissions[b.idx].ID,
+			PlagiarismResult: res,
+		}
+	})
 
 	sort.Slice(pairs, func(i, j int) bool {
 		return pairs[i].SimilarityPercent > pairs[j].SimilarityPercent

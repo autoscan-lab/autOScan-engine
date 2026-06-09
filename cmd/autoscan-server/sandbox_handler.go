@@ -111,14 +111,17 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sim, err := engine.ComputeSimilarityForProcess(submissions, sandboxSourceFile, defaultCompareConfig)
+	// Fingerprint each submission once; similarity and AI detection share it.
+	prints := engine.FingerprintSubmissions(submissions, sandboxSourceFile, defaultCompareConfig)
+
+	sim, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sandboxSourceFile, defaultCompareConfig)
 	if err != nil {
 		writeError(w, &httpError{status: 500, msg: "computing similarity: " + err.Error()})
 		return
 	}
 	trimSimilarityReport(&sim, true, 0)
 
-	ai, err := engine.ComputeAIDetectionForProcess(submissions, sandboxSourceFile, dict, defaultCompareConfig)
+	ai, err := engine.ComputeAIDetectionFromFingerprints(submissions, prints, sandboxSourceFile, dict, defaultCompareConfig)
 	if err != nil {
 		writeError(w, &httpError{status: 500, msg: "computing ai detection: " + err.Error()})
 		return

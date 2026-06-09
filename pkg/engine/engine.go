@@ -50,6 +50,22 @@ func ComputeAIDetectionForProcess(submissions []domain.Submission, srcFile strin
 	return internalengine.ComputeAIDetectionForProcess(submissions, srcFile, dict, cfg)
 }
 
+// SubmissionFingerprint lets callers fingerprint submissions once and feed the
+// result to both similarity and AI detection instead of fingerprinting twice.
+type SubmissionFingerprint = internalengine.SubmissionFingerprint
+
+func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) []SubmissionFingerprint {
+	return internalengine.FingerprintSubmissions(submissions, srcFile, cfg)
+}
+
+func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
+	return internalengine.ComputeSimilarityFromFingerprints(submissions, prints, srcFile, cfg)
+}
+
+func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
+	return internalengine.ComputeAIDetectionFromFingerprints(submissions, prints, srcFile, dict, cfg)
+}
+
 func Run(r *Runner, ctx context.Context, root string, callbacks RunnerCallbacks) (*domain.RunReport, error) {
 	return r.Run(ctx, root, callbacks)
 }
