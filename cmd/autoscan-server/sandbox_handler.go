@@ -31,9 +31,16 @@ type sandboxSummary struct {
 	FlaggedSubmissions int `json:"flagged_submissions"`
 }
 
+type sandboxFile struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
 type sandboxSubmissionSource struct {
-	ID     string `json:"id"`
-	Source string `json:"source"`
+	ID     string        `json:"id"`
+	Source string        `json:"source"`
+	Files  []sandboxFile `json:"files"`
 }
 
 type sandboxAnalyzeResponse struct {
@@ -248,6 +255,7 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 	}
 	var submissions []domain.Submission
 	sourceByID := map[string]string{}
+	filesByID := map[string][]sandboxFile{}
 	seen := map[string]int{}
 
 	err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
@@ -272,7 +280,7 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 		if err := extractArchive(path, subDir); err != nil {
 			return err
 		}
-		combined, err := concatCSources(subDir)
+		combined, files, err := concatCSources(subDir)
 		if err != nil {
 			return err
 		}
@@ -284,6 +292,7 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 		}
 		submissions = append(submissions, domain.NewSubmission(id, subDir, []string{sandboxSourceFile}))
 		sourceByID[id] = combined
+		filesByID[id] = files
 		return nil
 	})
 	if err != nil {
@@ -293,7 +302,11 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 
 	sources := make([]sandboxSubmissionSource, 0, len(submissions))
 	for _, sub := range submissions {
-		sources = append(sources, sandboxSubmissionSource{ID: sub.ID, Source: sourceByID[sub.ID]})
+		sources = append(sources, sandboxSubmissionSource{
+			ID:     sub.ID,
+			Source: sourceByID[sub.ID],
+			Files:  filesByID[sub.ID],
+		})
 	}
 	return submissions, sources, nil
 }
@@ -320,8 +333,11 @@ func submissionID(path string) string {
 }
 
 // concatCSources reads every .c/.h file under dir (sorted) and joins them into
-// a single source blob.
-func concatCSources(dir string) (string, error) {
+// a single source blob. It also returns a manifest mapping each original file to
+// the 1-based line range its content occupies in the blob (the same coordinate
+// the analyzers report span lines in), so the UI can remap the blob back to a
+// per-file tree and route spans to files.
+func concatCSources(dir string) (string, []sandboxFile, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -337,20 +353,41 @@ func concatCSources(dir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	sort.Strings(files)
 
 	var b strings.Builder
+	manifest := make([]sandboxFile, 0, len(files))
+	line := 1 // 1-based line where the next written character begins
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		rel, _ := filepath.Rel(dir, f)
+		rel = filepath.ToSlash(rel)
+
+		// Marker comment occupies one line; the file's content starts on the next.
 		b.WriteString("/* ==== " + rel + " ==== */\n")
+		line++
+
+		src := string(data)
+		// Lines the content occupies once the trailing newline is added below: the
+		// newline count, plus one for a final unterminated (or empty) line.
+		contentLines := strings.Count(src, "\n")
+		if len(src) == 0 || !strings.HasSuffix(src, "\n") {
+			contentLines++
+		}
+		manifest = append(manifest, sandboxFile{
+			Path:      rel,
+			StartLine: line,
+			EndLine:   line + contentLines - 1,
+		})
+
 		b.Write(data)
 		b.WriteString("\n")
+		line += strings.Count(src, "\n") + 1
 	}
-	return b.String(), nil
+	return b.String(), manifest, nil
 }
