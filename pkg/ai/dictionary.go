@@ -13,10 +13,9 @@ type Dictionary struct {
 
 // Entry is one code pattern to compare against submissions.
 type Entry struct {
-	ID       string `yaml:"id"`
-	Category string `yaml:"category"`
-	Title    string `yaml:"title"`
-	Code     string `yaml:"code"`
+	ID    string `yaml:"id"`
+	Title string `yaml:"title"`
+	Code  string `yaml:"code"`
 }
 
 // ValidationError aggregates schema/quality issues for a dictionary.
@@ -54,9 +53,6 @@ func (d *Dictionary) Validate() error {
 			seen[id]++
 		}
 
-		if strings.TrimSpace(e.Category) == "" {
-			problems = append(problems, fmt.Sprintf("entry %d (%q): category is required", row, id))
-		}
 		if strings.TrimSpace(e.Title) == "" {
 			problems = append(problems, fmt.Sprintf("entry %d (%q): title is required", row, id))
 		}

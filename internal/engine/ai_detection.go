@@ -137,12 +137,11 @@ func compareSubmissionToDictionary(subFP domain.FileFingerprint, dictFPs []dicti
 		}
 
 		matches = append(matches, domain.AIDictionaryMatch{
-			EntryID:  d.entry.ID,
-			Category: d.entry.Category,
-			Title:    d.entry.Title,
-			Jaccard:  score,
-			Flagged:  score >= cfg.ScoreThreshold,
-			Spans:    extractSubmissionMatches(subFP, d.fp),
+			EntryID: d.entry.ID,
+			Title:   d.entry.Title,
+			Jaccard: score,
+			Flagged: score >= cfg.ScoreThreshold,
+			Spans:   extractSubmissionMatches(subFP, d.fp),
 		})
 	}
 

@@ -6,12 +6,11 @@ type AIDictionaryEntryError struct {
 }
 
 type AIDictionaryMatch struct {
-	EntryID  string      `json:"entry_id"`
-	Category string      `json:"category"`
-	Title    string      `json:"title"`
-	Jaccard  float64     `json:"jaccard"`
-	Flagged  bool        `json:"flagged"`
-	Spans    []MatchSpan `json:"spans,omitempty"`
+	EntryID string      `json:"entry_id"`
+	Title   string      `json:"title"`
+	Jaccard float64     `json:"jaccard"`
+	Flagged bool        `json:"flagged"`
+	Spans   []MatchSpan `json:"spans,omitempty"`
 }
 
 type AISubmissionResult struct {
