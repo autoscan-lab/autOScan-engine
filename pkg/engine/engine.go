@@ -66,6 +66,12 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 	return internalengine.ComputeAIDetectionFromFingerprints(submissions, prints, srcFile, dict, cfg)
 }
 
+// InteractiveSandbox wraps an interactive command (e.g. a PTY shell) in the
+// grading sandbox: workDir read-write, no network, prlimit + memory ceilings.
+func InteractiveSandbox(workDir string, cmd []string) (argv []string, cleanup func(), sandboxed bool) {
+	return internalengine.InteractiveSandbox(workDir, cmd)
+}
+
 func Run(r *Runner, ctx context.Context, root string, callbacks RunnerCallbacks) (*domain.RunReport, error) {
 	return r.Run(ctx, root, callbacks)
 }

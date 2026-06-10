@@ -55,6 +55,9 @@ func main() {
 	mux.Handle("POST /analyze/similarity", protected(srv.analyzeSimilarity))
 	mux.Handle("POST /analyze/ai-detection", protected(srv.analyzeAIDetection))
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
+	// Token-authenticated (HMAC minted by the agent) instead of withSecret:
+	// the browser connects directly and cannot carry the engine secret.
+	mux.Handle("GET /terminal", limitRequests(limiter, http.HandlerFunc(srv.terminal)))
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,

@@ -57,6 +57,20 @@ func existingPaths(paths ...string) []string {
 }
 
 // sandboxCommand builds the argv to run cmd inside bubblewrap with resource
+// InteractiveSandbox builds the argv and cleanup to run an interactive command
+// (e.g. a shell on a PTY) inside the same bubblewrap sandbox used for graded
+// submissions: workDir bound read-write, no network, prlimit + memory cgroup
+// ceilings. sandboxed is false when bubblewrap is unavailable, in which case
+// the caller should run cmd directly.
+func InteractiveSandbox(workDir string, cmd []string) (argv []string, cleanup func(), sandboxed bool) {
+	if !sandboxAvailable() {
+		return cmd, func() {}, false
+	}
+	argv, cleanup = sandboxCommand(sandboxSpec{workDir: workDir}, cmd)
+	return argv, cleanup, true
+}
+
+// sandboxCommand builds the argv to run cmd inside bubblewrap with resource
 // limits and a memory cgroup. cleanup must be called once the process exits.
 func sandboxCommand(spec sandboxSpec, cmd []string) (argv []string, cleanup func()) {
 	argv = sandboxArgv(spec, cmd)

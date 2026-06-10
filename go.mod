@@ -3,6 +3,8 @@ module github.com/autoscan-lab/autoscan-engine
 go 1.25
 
 require (
+	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/minio/minio-go/v7 v7.0.100
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	gopkg.in/yaml.v3 v3.0.1

@@ -21,10 +21,13 @@ primary_region = 'ams'
   min_machines_running = 0
   processes = ['app']
 
+  # Long-lived terminal WebSockets each occupy a slot, so the ceiling leaves
+  # room for grading requests alongside open terminals (engine caps terminal
+  # sessions at 5 itself).
   [http_service.concurrency]
     type = 'requests'
-    hard_limit = 5
-    soft_limit = 3
+    hard_limit = 25
+    soft_limit = 20
 
 [[vm]]
   memory = '2gb'
