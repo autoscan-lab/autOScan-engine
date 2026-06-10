@@ -64,7 +64,9 @@ func releaseTerminalSlot() {
 type terminalClaims struct {
 	RunID        string `json:"run_id"`
 	SubmissionID string `json:"submission_id"`
-	Exp          int64  `json:"exp"`
+	// Display label for the shell prompt (autoscan@<student>).
+	Student string `json:"student,omitempty"`
+	Exp     int64  `json:"exp"`
 }
 
 // parseTerminalToken validates "payload.sig" where payload is base64url JSON
@@ -99,22 +101,36 @@ func parseTerminalToken(secret, token string) (terminalClaims, error) {
 	return claims, nil
 }
 
-func terminalEnv(homeDir string) []string {
+// promptLabel reduces a student display name to a safe prompt token.
+func promptLabel(student string) string {
+	var out []rune
+	for _, r := range strings.ToLower(strings.TrimSpace(student)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			out = append(out, r)
+		case r == ' ':
+			out = append(out, '-')
+		}
+		if len(out) >= 32 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return "submission"
+	}
+	return string(out)
+}
+
+func terminalEnv(homeDir, student string) []string {
 	return []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=" + homeDir,
 		"LANG=C",
 		"LC_ALL=C",
 		"TERM=xterm-256color",
+		// Bash keeps an inherited PS1 (no rc files exist in the sandbox).
+		`PS1=autoscan@` + promptLabel(student) + `:\w$ `,
 	}
-}
-
-func terminalAcceptOptions(cfg config) *websocket.AcceptOptions {
-	if len(cfg.appOrigins) == 0 {
-		// Token-gated only; origins unrestricted when APP_ORIGIN is unset.
-		return &websocket.AcceptOptions{InsecureSkipVerify: true}
-	}
-	return &websocket.AcceptOptions{OriginPatterns: cfg.appOrigins}
 }
 
 // copyTree copies regular files and directories from src into dst.
@@ -229,7 +245,8 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, terminalAcceptOptions(s.cfg))
+	// Token-gated only; the short-lived signed token is the credential.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return
 	}
@@ -250,11 +267,11 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("terminal: session start run_id=%s submission=%s", claims.RunID, claims.SubmissionID)
-	runTerminalSession(conn, scratch)
+	runTerminalSession(conn, scratch, claims.Student)
 	log.Printf("terminal: session end run_id=%s submission=%s", claims.RunID, claims.SubmissionID)
 }
 
-func runTerminalSession(conn *websocket.Conn, scratch string) {
+func runTerminalSession(conn *websocket.Conn, scratch, student string) {
 	defer releaseTerminalSlot()
 	defer os.RemoveAll(scratch)
 
@@ -263,7 +280,7 @@ func runTerminalSession(conn *websocket.Conn, scratch string) {
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = scratch
-	cmd.Env = terminalEnv(scratch)
+	cmd.Env = terminalEnv(scratch, student)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

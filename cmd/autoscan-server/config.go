@@ -16,9 +16,6 @@ type config struct {
 	currentDir   string
 	port         string
 	engineSecret string
-	// Browser origins allowed to open terminal WebSockets (host patterns,
-	// comma-separated via APP_ORIGIN). Empty = token-gated only.
-	appOrigins []string
 
 	r2AccountID  string
 	r2AccessKey  string
@@ -37,19 +34,11 @@ func loadConfig() config {
 		port = "8080"
 	}
 
-	var appOrigins []string
-	for _, origin := range strings.Split(os.Getenv("APP_ORIGIN"), ",") {
-		if trimmed := strings.TrimSpace(origin); trimmed != "" {
-			appOrigins = append(appOrigins, trimmed)
-		}
-	}
-
 	return config{
 		dataDir:      dataDir,
 		currentDir:   filepath.Join(dataDir, "current"),
 		port:         port,
 		engineSecret: os.Getenv("ENGINE_SECRET"),
-		appOrigins:   appOrigins,
 		r2AccountID:  os.Getenv("R2_ACCOUNT_ID"),
 		r2AccessKey:  os.Getenv("R2_ACCESS_KEY_ID"),
 		r2SecretKey:  os.Getenv("R2_SECRET_ACCESS_KEY"),
