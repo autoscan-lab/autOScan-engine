@@ -30,7 +30,12 @@ primary_region = 'ams'
     soft_limit = 20
 
 [[vm]]
+  # 2 shared CPUs on purpose: the engine sizes its compile/scan worker pools to
+  # runtime.NumCPU(), so extra vCPUs just oversubscribe weak shared cores and
+  # thrash (gcc + valgrind). 2 is the sweet spot for bursty C grading on small
+  # labs. RAM stays at 2gb for parallel-valgrind headroom (negligible cost under
+  # scale-to-zero).
   memory = '2gb'
   cpu_kind = 'shared'
-  cpus = 8
+  cpus = 2
   memory_mb = 2048
