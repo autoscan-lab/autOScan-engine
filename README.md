@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/go-1.22+-00ADD8?style=flat&logo=go&logoColor=white" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" /></a>
   <a href="#"><img src="https://img.shields.io/badge/type-engine-1f6feb?style=flat" /></a>
   <a href="#"><img src="https://img.shields.io/badge/compiler-gcc-A42E2B?style=flat" /></a>
   <a href="#"><img src="https://img.shields.io/badge/runtime-valgrind-5c6bc0?style=flat" /></a>
@@ -32,6 +32,8 @@ service setup, deployment, environment variables, and HTTP API details, see
 - Multi-process execution: spawns every configured executable concurrently and returns one buffered result per scenario
 - Always-on Valgrind validation for leaks, reachable memory, memory errors, and open file descriptors
 - Sandboxed environment for grading untrusted submissions
+- Interactive terminal sessions: up to 4 shell panes per submission sharing
+  one sandbox, so processes from different panes can IPC
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via C token fingerprinting
 - AI-pattern detection against dictionary fingerprints
@@ -42,10 +44,11 @@ service setup, deployment, environment variables, and HTTP API details, see
 
 ## Installation
 
-Requires: Go 1.22+, `gcc`, `valgrind`
+Requires: Go 1.25+, `gcc`, `valgrind`
 
 ```bash
 go build ./...
+go test ./...   # tests live in tests/ and need no sandbox
 ```
 
 ## Usage
@@ -93,7 +96,9 @@ autOScan-engine/
 ├── pkg/domain/            # Shared engine models/results
 ├── pkg/policy/            # Policy models/loading/helpers
 ├── pkg/ai/                # AI dictionary parsing/validation
-└── internal/engine/       # Engine internals
+├── internal/engine/       # Engine internals (compile/run/sandbox)
+├── internal/terminal/     # Interactive terminal sessions (pane-host, tokens)
+└── tests/                 # Black-box tests over the exported surfaces
 ```
 
 ---

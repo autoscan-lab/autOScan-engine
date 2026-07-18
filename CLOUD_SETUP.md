@@ -7,8 +7,11 @@ your-bucket-name/
   banned.yaml             # global, applied to every assignment
   ai_dictionary.yaml      # global, optional — required only for AI-detection
   assignments/
-    <assignment-name>/    # one folder per assignment
+    <assignment-name>/    # one folder per assignment; the whole prefix is synced
       policy.yml
+      expected_outputs/   # optional: test-case + scenario expected outputs
+      libraries/          # optional: companion .c/.o/.h files
+      test_files/         # optional: data files passed as args
     .../
       policy.yml
 ```
@@ -37,9 +40,14 @@ fly deploy
 
 - `GET  /health`
 - `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/<assignment-name>`)
-- `POST /grade` — accepts a zip, returns JSON results + `run_id`
+- `POST /grade` — accepts a zip, returns JSON results + `run_id` (+ `multi_process`
+  per submission for multi-process policies)
 - `POST /analyze/similarity` — computes similarity for an existing `run_id`
 - `POST /analyze/ai-detection` — computes AI detection for an existing `run_id`
+- `POST /sandbox/analyze` — ad-hoc similarity + AI detection on a zip, no run state
+- `GET  /terminal` — WebSocket, one connection per shell pane; auth is a
+  short-lived HMAC token minted by the web app (not the secret header). Panes
+  of one token share a sandboxed session.
 
 `/grade` only performs grading and stores run metadata for follow-up analysis.
 
