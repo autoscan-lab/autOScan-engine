@@ -1,137 +1,29 @@
 package main
 
 import (
-	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
-	"time"
 
 	"github.com/coder/websocket"
-	"github.com/creack/pty"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
-	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
 )
 
-// Interactive terminal: a PTY running bash inside the grading sandbox, scoped
-// to a scratch copy of one graded submission, streamed over a WebSocket.
+// Interactive terminal: bash PTYs inside the grading sandbox, scoped to a
+// scratch copy of one graded submission, streamed over WebSockets. Panes of
+// the same token share one sandbox (internal/terminal) so student processes
+// can IPC across panes.
 //
 // Auth: the agent mints a short-lived HMAC token (signed with ENGINE_SECRET)
-// binding {run_id, submission_id, exp}; the browser connects directly with it.
-// Sessions run on a scratch copy so the graded workspace — which /analyze/*
-// re-reads — is never mutated.
-
-const (
-	maxTerminalSessions = 5
-	terminalIdleTimeout = 10 * time.Minute
-	terminalMaxLifetime = 45 * time.Minute
-)
-
-var terminalSlots struct {
-	sync.Mutex
-	count int
-}
-
-func acquireTerminalSlot() bool {
-	terminalSlots.Lock()
-	defer terminalSlots.Unlock()
-	if terminalSlots.count >= maxTerminalSessions {
-		return false
-	}
-	terminalSlots.count++
-	return true
-}
-
-func releaseTerminalSlot() {
-	terminalSlots.Lock()
-	defer terminalSlots.Unlock()
-	terminalSlots.count--
-}
-
-type terminalClaims struct {
-	RunID        string `json:"run_id"`
-	SubmissionID string `json:"submission_id"`
-	// Display label for the shell prompt (autoscan@<student>).
-	Student string `json:"student,omitempty"`
-	Exp     int64  `json:"exp"`
-}
-
-// parseTerminalToken validates "payload.sig" where payload is base64url JSON
-// claims and sig is base64url HMAC-SHA256(secret, payload).
-func parseTerminalToken(secret, token string) (terminalClaims, error) {
-	payload, sig, ok := strings.Cut(token, ".")
-	if !ok || payload == "" || sig == "" {
-		return terminalClaims{}, errors.New("malformed token")
-	}
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(want), []byte(sig)) != 1 {
-		return terminalClaims{}, errors.New("invalid token signature")
-	}
-
-	body, err := base64.RawURLEncoding.DecodeString(payload)
-	if err != nil {
-		return terminalClaims{}, errors.New("malformed token payload")
-	}
-	var claims terminalClaims
-	if err := json.Unmarshal(body, &claims); err != nil {
-		return terminalClaims{}, errors.New("malformed token claims")
-	}
-	if claims.RunID == "" || claims.SubmissionID == "" {
-		return terminalClaims{}, errors.New("incomplete token claims")
-	}
-	if time.Now().Unix() > claims.Exp {
-		return terminalClaims{}, errors.New("token expired")
-	}
-	return claims, nil
-}
-
-// promptLabel reduces a student display name to a safe prompt token.
-func promptLabel(student string) string {
-	var out []rune
-	for _, r := range strings.ToLower(strings.TrimSpace(student)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-			out = append(out, r)
-		case r == ' ':
-			out = append(out, '-')
-		}
-		if len(out) >= 32 {
-			break
-		}
-	}
-	if len(out) == 0 {
-		return "submission"
-	}
-	return string(out)
-}
-
-func terminalEnv(homeDir, student string) []string {
-	return []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=" + homeDir,
-		"LANG=C",
-		"LC_ALL=C",
-		"TERM=xterm-256color",
-		// Bash keeps an inherited PS1 (no rc files exist in the sandbox).
-		`PS1=autoscan@` + promptLabel(student) + `:\w$ `,
-	}
-}
+// binding {run_id, submission_id, session_id, panes, exp}; the browser opens
+// one WebSocket per pane with it. Sessions run on a scratch copy so the graded
+// workspace — which /analyze/* re-reads — is never mutated.
 
 // copyTree copies regular files and directories from src into dst.
 func copyTree(src, dst string) error {
@@ -208,7 +100,7 @@ func buildTerminalScratch(cfg config, sub domain.Submission) (string, error) {
 }
 
 func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
-	claims, err := parseTerminalToken(s.cfg.engineSecret, r.URL.Query().Get("token"))
+	claims, err := terminal.ParseToken(s.cfg.engineSecret, r.URL.Query().Get("token"))
 	if err != nil {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
@@ -251,135 +143,23 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !acquireTerminalSlot() {
-		_ = conn.Close(websocket.StatusTryAgainLater, "terminal session limit reached")
-		return
-	}
-
-	s.mu.RLock()
-	scratch, err := buildTerminalScratch(s.cfg, *sub)
-	s.mu.RUnlock()
-	if err != nil {
-		releaseTerminalSlot()
-		log.Printf("terminal: scratch setup failed run_id=%s submission=%s: %v", claims.RunID, claims.SubmissionID, err)
-		_ = conn.Close(websocket.StatusInternalError, "could not prepare workspace")
-		return
-	}
-
-	log.Printf("terminal: session start run_id=%s submission=%s", claims.RunID, claims.SubmissionID)
-	runTerminalSession(conn, scratch, claims.Student)
-	log.Printf("terminal: session end run_id=%s submission=%s", claims.RunID, claims.SubmissionID)
-}
-
-func runTerminalSession(conn *websocket.Conn, scratch, student string) {
-	defer releaseTerminalSlot()
-	defer os.RemoveAll(scratch)
-
-	argv, cgroupCleanup, _ := engine.InteractiveSandbox(scratch, []string{"bash"})
-	defer cgroupCleanup()
-
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = scratch
-	cmd.Env = terminalEnv(scratch, student)
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		log.Printf("terminal: shell start failed: %v", err)
-		_ = conn.Close(websocket.StatusInternalError, "could not start shell")
-		return
-	}
-	defer func() { _ = cmd.Wait() }()
-	_ = pty.Setsize(ptmx, &pty.Winsize{Cols: 80, Rows: 24})
-
-	ctx, cancel := context.WithTimeout(context.Background(), terminalMaxLifetime)
-	defer cancel()
-
-	var once sync.Once
-	finish := func(code websocket.StatusCode, reason string) {
-		once.Do(func() {
-			if cmd.Process != nil {
-				// pty.Start makes the shell a session leader, so its pid is
-				// the process group covering everything it spawned.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
-			_ = ptmx.Close()
-			_ = conn.Close(code, reason)
-			cancel()
-		})
-	}
-
-	idle := time.AfterFunc(terminalIdleTimeout, func() {
-		finish(websocket.StatusNormalClosure, "session closed after inactivity")
+	// The scratch copy reads the active config, so it takes the same read
+	// lock /grade and /analyze use against /setup swaps.
+	ts, err := terminal.Join(claims, func() (string, error) {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return buildTerminalScratch(s.cfg, *sub)
 	})
-	defer idle.Stop()
-
-	go func() {
-		<-ctx.Done()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			finish(websocket.StatusNormalClosure, "session time limit reached")
+	if err != nil {
+		code := websocket.StatusInternalError
+		if errors.Is(err, terminal.ErrSessionLimit) || errors.Is(err, terminal.ErrPaneLimit) || errors.Is(err, terminal.ErrSessionClosed) {
+			code = websocket.StatusTryAgainLater
 		}
-	}()
-
-	// Shell output → socket.
-	go func() {
-		buf := make([]byte, 16<<10)
-		for {
-			n, readErr := ptmx.Read(buf)
-			if n > 0 {
-				if conn.Write(ctx, websocket.MessageBinary, buf[:n]) != nil {
-					finish(websocket.StatusNormalClosure, "connection closed")
-					return
-				}
-			}
-			if readErr != nil {
-				finish(websocket.StatusNormalClosure, "shell exited")
-				return
-			}
-		}
-	}()
-
-	// Keepalive through proxies; also detects vanished clients.
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if conn.Ping(ctx) != nil {
-					finish(websocket.StatusNormalClosure, "connection lost")
-					return
-				}
-			}
-		}
-	}()
-
-	// Socket → shell. Binary frames are raw input; text frames are control
-	// messages (resize). Only real input resets the idle timer.
-	conn.SetReadLimit(1 << 20)
-	for {
-		kind, data, readErr := conn.Read(ctx)
-		if readErr != nil {
-			finish(websocket.StatusNormalClosure, "connection closed")
-			return
-		}
-		switch kind {
-		case websocket.MessageBinary:
-			idle.Reset(terminalIdleTimeout)
-			if _, writeErr := ptmx.Write(data); writeErr != nil {
-				finish(websocket.StatusNormalClosure, "shell exited")
-				return
-			}
-		case websocket.MessageText:
-			var msg struct {
-				Type string `json:"type"`
-				Cols uint16 `json:"cols"`
-				Rows uint16 `json:"rows"`
-			}
-			if json.Unmarshal(data, &msg) == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: msg.Cols, Rows: msg.Rows})
-			}
-		}
+		_ = conn.Close(code, err.Error())
+		return
 	}
+
+	log.Printf("terminal: pane start run_id=%s submission=%s session=%s", claims.RunID, claims.SubmissionID, ts.ID())
+	terminal.ServePane(conn, ts)
+	log.Printf("terminal: pane end run_id=%s submission=%s session=%s", claims.RunID, claims.SubmissionID, ts.ID())
 }

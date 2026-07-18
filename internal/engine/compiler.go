@@ -174,7 +174,7 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = sub.Path
-	cmd.Env = minimalEnv(sub.Path)
+	cmd.Env = MinimalEnv(sub.Path)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -293,7 +293,7 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		configureProcessGroup(cmd)
 		cmd.Cancel = func() error { return killProcessGroup(cmd) }
 		cmd.Dir = sub.Path
-		cmd.Env = minimalEnv(sub.Path)
+		cmd.Env = MinimalEnv(sub.Path)
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout

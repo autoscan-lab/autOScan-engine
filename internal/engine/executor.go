@@ -19,9 +19,9 @@ import (
 // DefaultExecTimeout caps how long a single submission process may run.
 const DefaultExecTimeout = 10 * time.Second
 
-// minimalEnv returns a scrubbed environment for child processes, so untrusted
+// MinimalEnv returns a scrubbed environment for child processes, so untrusted
 // submission code cannot inherit the server's secrets.
-func minimalEnv(homeDir string) []string {
+func MinimalEnv(homeDir string) []string {
 	return []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=" + homeDir,
@@ -178,7 +178,7 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
-	cmd.Env = minimalEnv(binaryDir)
+	cmd.Env = MinimalEnv(binaryDir)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(unescapeInput(input))
 	}
@@ -421,7 +421,7 @@ func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, pro
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.Dir = binaryDir
-	cmd.Env = minimalEnv(binaryDir)
+	cmd.Env = MinimalEnv(binaryDir)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(unescapeInput(input))
 	}

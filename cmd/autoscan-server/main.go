@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
@@ -30,6 +31,12 @@ type httpError struct {
 func (e *httpError) Error() string { return e.msg }
 
 func main() {
+	// pane-host mode runs inside a terminal session's sandbox with no config
+	// or secrets — dispatch before loadConfig so it needs neither.
+	if len(os.Args) >= 3 && os.Args[1] == "pane-host" {
+		os.Exit(terminal.RunPaneHost(os.Args[2]))
+	}
+
 	cfg := loadConfig()
 
 	if err := cfg.requireSecret(); err != nil {
@@ -81,6 +88,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	terminal.TeardownAll("server shutting down")
 }
 
 type server struct {

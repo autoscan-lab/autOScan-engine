@@ -33,6 +33,7 @@ const memoryCgroupRoot = "/sys/fs/cgroup/memory"
 type sandboxSpec struct {
 	workDir  string   // bound read-write; the process's working directory
 	readOnly []string // extra host paths bound read-only
+	netAdmin bool     // grant ambient CAP_NET_ADMIN so the payload can raise loopback
 }
 
 // sandboxAvailable reports whether the bubblewrap launcher is installed. When
@@ -66,7 +67,9 @@ func InteractiveSandbox(workDir string, cmd []string) (argv []string, cleanup fu
 	if !sandboxAvailable() {
 		return cmd, func() {}, false
 	}
-	argv, cleanup = sandboxCommand(sandboxSpec{workDir: workDir}, cmd)
+	// netAdmin lets the session's pane-host bring the namespace's loopback up
+	// so student processes in different panes can talk over 127.0.0.1.
+	argv, cleanup = sandboxCommand(sandboxSpec{workDir: workDir, netAdmin: true}, cmd)
 	return argv, cleanup, true
 }
 
@@ -109,7 +112,13 @@ func sandboxArgv(spec sandboxSpec, cmd []string) []string {
 		"--symlink", "usr/lib64", "/lib64",
 		"--proc", "/proc",
 		"--dev", "/dev",
+		// POSIX message queues need an mqueue mount; bwrap's --dev provides
+		// /dev/shm (POSIX shm/semaphores) but no mqueue instance.
+		"--mqueue", "/dev/mqueue",
 		"--tmpfs", "/tmp",
+	}
+	if spec.netAdmin {
+		argv = append(argv, "--cap-add", "CAP_NET_ADMIN")
 	}
 	for _, ro := range spec.readOnly {
 		argv = append(argv, "--ro-bind", ro, ro)
