@@ -66,6 +66,10 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	progress := s.progressReporterFor(r)
+	defer progress.done()
+	progress.report(0.03, "Downloading submissions")
+
 	workDir, err := os.MkdirTemp(s.cfg.dataDir, "sandbox-")
 	if err != nil {
 		writeError(w, err)
@@ -89,12 +93,14 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	progress.report(0.1, "Extracting submissions")
 	outerDir := filepath.Join(workDir, "outer")
 	if err := extractArchive(archivePath, outerDir); err != nil {
 		writeError(w, err)
 		return
 	}
 
+	progress.report(0.15, "Reading submissions")
 	submissions, sources, err := discoverSandboxSubmissions(outerDir, filepath.Join(workDir, "subs"))
 	if err != nil {
 		writeError(w, err)
@@ -105,6 +111,7 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	progress.report(0.3, "Loading AI dictionary")
 	dict, err := sandboxAIDictionary(r.Context(), s.cfg, workDir)
 	if err != nil {
 		writeError(w, err)
@@ -112,8 +119,10 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fingerprint each submission once; similarity and AI detection share it.
+	progress.report(0.35, "Fingerprinting submissions")
 	prints := engine.FingerprintSubmissions(submissions, sandboxSourceFile, defaultCompareConfig)
 
+	progress.report(0.55, "Computing similarity")
 	sim, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sandboxSourceFile, defaultCompareConfig)
 	if err != nil {
 		writeError(w, &httpError{status: 500, msg: "computing similarity: " + err.Error()})
@@ -121,6 +130,7 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 	trimSimilarityReport(&sim, true, 0)
 
+	progress.report(0.8, "Running AI detection")
 	ai, err := engine.ComputeAIDetectionFromFingerprints(submissions, prints, sandboxSourceFile, dict, defaultCompareConfig)
 	if err != nil {
 		writeError(w, &httpError{status: 500, msg: "computing ai detection: " + err.Error()})

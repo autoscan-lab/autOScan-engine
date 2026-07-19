@@ -48,7 +48,7 @@ func main() {
 	}
 	pruneOldRuns(cfg)
 
-	srv := &server{cfg: cfg}
+	srv := &server{cfg: cfg, progress: newProgressTracker()}
 
 	limiter := newRateLimiter(defaultRateLimitPerSecond, defaultRateLimitBurst)
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -62,6 +62,7 @@ func main() {
 	mux.Handle("POST /analyze/similarity", protected(srv.analyzeSimilarity))
 	mux.Handle("POST /analyze/ai-detection", protected(srv.analyzeAIDetection))
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
+	mux.Handle("GET /progress/{token}", protected(srv.progressStatus))
 	// Token-authenticated (HMAC minted by the agent) instead of withSecret:
 	// the browser connects directly and cannot carry the engine secret.
 	mux.Handle("GET /terminal", limitRequests(limiter, http.HandlerFunc(srv.terminal)))
@@ -96,6 +97,8 @@ type server struct {
 	// mu serializes /setup against in-flight /grade and /analyze requests so
 	// the active config is never swapped mid-read.
 	mu sync.RWMutex
+	// progress tracks in-flight run progress for GET /progress/{token}.
+	progress *progressTracker
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
@@ -154,6 +157,10 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	progress := s.progressReporterFor(r)
+	defer progress.done()
+	progress.report(0.02, "Downloading submissions")
+
 	runID, err := newRunID()
 	if err != nil {
 		writeError(w, err)
@@ -203,6 +210,7 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	progress.report(0.05, "Extracting submissions")
 	if err := extractZip(archivePath, workspaceDir); err != nil {
 		writeError(w, err)
 		return
@@ -213,7 +221,7 @@ func (s *server) grade(w http.ResponseWriter, r *http.Request) {
 	if prefix := strings.TrimSpace(r.FormValue("export_key_prefix")); prefix != "" {
 		exportKey = strings.TrimRight(prefix, "/") + "/" + runID + "/export.zip"
 	}
-	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir, exportKey)
+	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir, exportKey, progress)
 	if err != nil {
 		writeError(w, err)
 		return

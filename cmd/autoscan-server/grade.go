@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
@@ -39,10 +40,20 @@ type sourceFile struct {
 	Content string `json:"content"`
 }
 
+// Fractions of the whole /grade request each pipeline phase occupies; the
+// download/extract steps before the pipeline own 0–0.08. Execution dominates
+// real runs, so it gets most of the bar.
+const (
+	gradeCompileStart = 0.08
+	gradeCompileEnd   = 0.30
+	gradeExecuteStart = 0.32
+	gradeExecuteEnd   = 0.98
+)
+
 // runGradingPipeline drives discovery → compile → scan → run-all-test-cases
 // against the workspace, producing a single canonical response. Compilation
 // happens once per submission; every test case reuses the resulting binary.
-func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey string) (*gradeResponse, error) {
+func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey string, progress progressReporter) (*gradeResponse, error) {
 	policyPath := filepath.Join(cfg.currentDir, policyFileName)
 
 	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(policyPath, cfg.currentDir)
@@ -67,7 +78,26 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 	}
 	defer runner.Cleanup()
 
-	report, err := runner.Run(ctx, rootPath, engine.RunnerCallbacks{})
+	// Per-submission compile progress. total is written before CompileAll spawns
+	// its workers; compiled counts callbacks arriving from those workers.
+	var total int
+	var compiled atomic.Int64
+	report, err := runner.Run(ctx, rootPath, engine.RunnerCallbacks{
+		OnDiscoveryComplete: func(submissions []domain.Submission) {
+			total = len(submissions)
+			progress.report(gradeCompileStart, "Compiling submissions")
+		},
+		OnCompileComplete: func(domain.Submission, domain.CompileResult) {
+			if total == 0 {
+				return
+			}
+			share := float64(compiled.Add(1)) / float64(total)
+			progress.report(
+				gradeCompileStart+(gradeCompileEnd-gradeCompileStart)*share,
+				"Compiling submissions",
+			)
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("running engine: %w", err)
 	}
@@ -80,14 +110,30 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 
 	executor := engine.NewExecutorWithOptions(loadedPolicy, binaryDir, false)
 
+	// Test/multi-process execution is the long phase and runs sequentially, so
+	// each finished submission advances the bar for real.
+	executed := 0
+	reportExecuted := func() {
+		executed++
+		share := float64(executed) / float64(len(resp.Results))
+		progress.report(
+			gradeExecuteStart+(gradeExecuteEnd-gradeExecuteStart)*share,
+			"Running submissions",
+		)
+	}
+
 	if executor.HasMultiProcess() {
+		progress.report(gradeExecuteStart, "Running submissions")
 		for i := range resp.Results {
 			runMultiProcess(ctx, executor, loadedPolicy, report.Results[i], &resp.Results[i])
+			reportExecuted()
 		}
 	} else if len(loadedPolicy.Run.TestCases) > 0 {
+		progress.report(gradeExecuteStart, "Running submissions")
 		expected := loadExpectedOutputs(loadedPolicy)
 		for i := range resp.Results {
 			runTestCases(ctx, executor, loadedPolicy, report.Results[i], &resp.Results[i], expected)
+			reportExecuted()
 		}
 	}
 
@@ -96,6 +142,7 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 	}
 
 	if exportKey != "" {
+		progress.report(0.99, "Uploading export")
 		if err := buildAndUploadExport(ctx, cfg, binaryDir, loadedPolicy, exportKey); err != nil {
 			return nil, fmt.Errorf("uploading export: %w", err)
 		}
