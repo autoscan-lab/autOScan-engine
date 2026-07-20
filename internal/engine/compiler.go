@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -153,12 +154,32 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 
 	outputPath := filepath.Join(outputDir, outputName)
 	libraryFiles, libDir, libraryWarnings := e.resolveLibraryFiles()
-	args := e.policy.BuildGCCArgs(sourceFiles, libraryFiles, outputPath)
 
-	if libDir != "" {
-		args = append([]string{"-I", libDir}, args...)
+	run := e.compileExecutable(ctx, sub, outputDir, sourceFiles, libraryFiles, libDir, outputPath)
+	duration := time.Since(start).Milliseconds()
+
+	stderrStr := run.stderr
+	if len(libraryWarnings) > 0 {
+		warnings := strings.Join(libraryWarnings, "\n") + "\n"
+		if stderrStr != "" {
+			stderrStr = warnings + "─── Compilation Output ───\n" + stderrStr
+		} else {
+			stderrStr = warnings
+		}
 	}
 
+	return domain.NewCompileResult(run.err == nil, run.cmd, run.stdout, stderrStr, duration, run.timedOut)
+}
+
+type gccRun struct {
+	cmd      []string
+	stdout   string
+	stderr   string
+	err      error
+	timedOut bool
+}
+
+func (e *CompileEngine) runGCC(ctx context.Context, sub domain.Submission, outputDir, libDir string, args []string) gccRun {
 	timeoutCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
@@ -181,21 +202,59 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	duration := time.Since(start).Milliseconds()
-	timedOut := timeoutCtx.Err() == context.DeadlineExceeded
+	return gccRun{
+		cmd:      append([]string{e.policy.Compile.GCC}, args...),
+		stdout:   stdout.String(),
+		stderr:   stderr.String(),
+		err:      err,
+		timedOut: timeoutCtx.Err() == context.DeadlineExceeded,
+	}
+}
 
-	stderrStr := stderr.String()
-	if len(libraryWarnings) > 0 {
-		warnings := strings.Join(libraryWarnings, "\n") + "\n"
-		if stderrStr != "" {
-			stderrStr = warnings + "─── Compilation Output ───\n" + stderrStr
-		} else {
-			stderrStr = warnings
-		}
+// compileExecutable links the policy library objects only when the source
+// actually includes one of the library headers. A submission that never
+// references the library implemented the functions itself; linking the
+// provided objects on top would only produce duplicate-symbol errors.
+func (e *CompileEngine) compileExecutable(ctx context.Context, sub domain.Submission, outputDir string, sourceFiles, libraryFiles []string, libDir, outputPath string) gccRun {
+	libs := libraryFiles
+	if !sourcesIncludeLibrary(sourceFiles, libraryFiles) {
+		libs = nil
 	}
 
-	fullCmd := append([]string{e.policy.Compile.GCC}, args...)
-	return domain.NewCompileResult(err == nil, fullCmd, stdout.String(), stderrStr, duration, timedOut)
+	args := e.policy.BuildGCCArgs(sourceFiles, libs, outputPath)
+	if libDir != "" {
+		args = append([]string{"-I", libDir}, args...)
+	}
+	return e.runGCC(ctx, sub, outputDir, libDir, args)
+}
+
+// sourcesIncludeLibrary reports whether any source file #includes one of the
+// policy's library headers. With no headers among the library files there is
+// nothing to detect, so the library is always linked.
+func sourcesIncludeLibrary(sourceFiles, libraryFiles []string) bool {
+	var headers []string
+	for _, lib := range libraryFiles {
+		if strings.HasSuffix(lib, ".h") {
+			headers = append(headers, filepath.Base(lib))
+		}
+	}
+	if len(headers) == 0 {
+		return true
+	}
+
+	for _, src := range sourceFiles {
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		for _, header := range headers {
+			pattern := regexp.MustCompile(`(?m)^\s*#\s*include\s*["<]` + regexp.QuoteMeta(header) + `[">]`)
+			if pattern.Match(data) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *CompileEngine) resolveLibraryFiles() ([]string, string, []string) {
@@ -277,49 +336,24 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		binaryName := strings.TrimSuffix(proc.SourceFile, ".c")
 		outputPath := filepath.Join(outputDir, binaryName)
 
-		args := e.policy.BuildGCCArgs([]string{sourceFile}, libraryFiles, outputPath)
-		if libDir != "" {
-			args = append([]string{"-I", libDir}, args...)
-		}
-
-		timeoutCtx, cancel := context.WithTimeout(ctx, e.timeout)
-		gccCmdline := append([]string{e.policy.Compile.GCC}, args...)
-		cleanup := func() {}
-		if sandboxAvailable() {
-			spec := sandboxSpec{workDir: outputDir, readOnly: existingPaths(sub.Path, libDir)}
-			gccCmdline, cleanup = sandboxCommand(spec, gccCmdline)
-		}
-		cmd := exec.CommandContext(timeoutCtx, gccCmdline[0], gccCmdline[1:]...)
-		configureProcessGroup(cmd)
-		cmd.Cancel = func() error { return killProcessGroup(cmd) }
-		cmd.Dir = sub.Path
-		cmd.Env = MinimalEnv(sub.Path)
-
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		err := cmd.Run()
-		if timeoutCtx.Err() == context.DeadlineExceeded {
+		run := e.compileExecutable(ctx, sub, outputDir, []string{sourceFile}, libraryFiles, libDir, outputPath)
+		if run.timedOut {
 			timedOut = true
 		}
-		cancel()
-		cleanup()
 
-		fullCmd := append([]string{e.policy.Compile.GCC}, args...)
-		allCmds = append(allCmds, fullCmd...)
+		allCmds = append(allCmds, run.cmd...)
 		allCmds = append(allCmds, ";")
 
-		if stdout.Len() > 0 {
-			allStdout.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name))
-			allStdout.Write(stdout.Bytes())
+		if run.stdout != "" {
+			allStdout.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name()))
+			allStdout.WriteString(run.stdout)
 		}
-		if stderr.Len() > 0 {
-			allStderr.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name))
-			allStderr.Write(stderr.Bytes())
+		if run.stderr != "" {
+			allStderr.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name()))
+			allStderr.WriteString(run.stderr)
 		}
 
-		if err != nil {
+		if run.err != nil {
 			allOK = false
 		}
 	}

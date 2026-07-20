@@ -37,18 +37,24 @@ type MultiProcessConfig struct {
 	TestScenarios []MultiProcessScenario `yaml:"test_scenarios,omitempty"`
 }
 
+// ProcessConfig only carries the source file an executable compiles from. Args,
+// stdin, start delays, and expected outputs all live on the scenarios that run
+// them, keyed by Name().
 type ProcessConfig struct {
-	Name         string   `yaml:"name"`
-	SourceFile   string   `yaml:"source_file"`
-	Args         []string `yaml:"args,omitempty"`
-	Input        string   `yaml:"input,omitempty"`
-	StartDelayMs int      `yaml:"start_delay_ms,omitempty"`
+	SourceFile string `yaml:"source_file"`
+}
+
+// Name identifies the process everywhere (scenario keys, results, compile
+// sections): the source file's stem, e.g. "S4_client.c" -> "S4_client".
+func (p ProcessConfig) Name() string {
+	return strings.TrimSuffix(filepath.Base(p.SourceFile), ".c")
 }
 
 type MultiProcessScenario struct {
 	Name            string              `yaml:"name"`
 	ProcessArgs     map[string][]string `yaml:"process_args,omitempty"`
 	ProcessInputs   map[string]string   `yaml:"process_inputs,omitempty"`
+	ProcessDelays   map[string]int      `yaml:"process_delays,omitempty"` // start delay per process, ms
 	ExpectedOutputs map[string]string   `yaml:"expected_outputs,omitempty"`
 }
 

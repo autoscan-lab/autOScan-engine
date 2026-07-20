@@ -348,31 +348,29 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 	var wg sync.WaitGroup
 
 	for _, proc := range config.Executables {
-		args := proc.Args
-		input := proc.Input
+		var args []string
+		var input string
+		delayMs := 0
 
 		if scenario != nil {
-			if scenarioArgs, ok := scenario.ProcessArgs[proc.Name]; ok {
-				args = scenarioArgs
-			}
-			if scenarioInput, ok := scenario.ProcessInputs[proc.Name]; ok {
-				input = scenarioInput
-			}
+			args = scenario.ProcessArgs[proc.Name()]
+			input = scenario.ProcessInputs[proc.Name()]
+			delayMs = scenario.ProcessDelays[proc.Name()]
 		}
 
 		args = e.resolveTestFilePaths(args)
 
 		procResult := &domain.ProcessResult{
-			Name:       proc.Name,
+			Name:       proc.Name(),
 			SourceFile: proc.SourceFile,
 		}
-		result.AddProcess(proc.Name, procResult)
+		result.AddProcess(proc.Name(), procResult)
 
 		wg.Add(1)
-		go func(proc policy.ProcessConfig, args []string, input string, procResult *domain.ProcessResult) {
+		go func(proc policy.ProcessConfig, args []string, input string, delayMs int, procResult *domain.ProcessResult) {
 			defer wg.Done()
-			e.runOneProcess(ctx, sub, proc, args, input, scenario, procResult)
-		}(proc, args, input, procResult)
+			e.runOneProcess(ctx, sub, proc, args, input, delayMs, scenario, procResult)
+		}(proc, args, input, delayMs, procResult)
 	}
 
 	wg.Wait()
@@ -384,10 +382,10 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 
 // runOneProcess executes a single process from a multi-process config, buffering
 // its stdout/stderr and recording the outcome on procResult.
-func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, proc policy.ProcessConfig, args []string, input string, scenario *policy.MultiProcessScenario, procResult *domain.ProcessResult) {
-	if proc.StartDelayMs > 0 {
+func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, proc policy.ProcessConfig, args []string, input string, delayMs int, scenario *policy.MultiProcessScenario, procResult *domain.ProcessResult) {
+	if delayMs > 0 {
 		select {
-		case <-time.After(time.Duration(proc.StartDelayMs) * time.Millisecond):
+		case <-time.After(time.Duration(delayMs) * time.Millisecond):
 		case <-ctx.Done():
 			procResult.Killed = true
 			return
@@ -458,7 +456,7 @@ func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, pro
 	procResult.Passed = runOK && !procResult.Killed && procResult.CrashReason == ""
 
 	if scenario != nil && scenario.ExpectedOutputs != nil {
-		if expectedFile, ok := scenario.ExpectedOutputs[proc.Name]; ok && expectedFile != "" {
+		if expectedFile, ok := scenario.ExpectedOutputs[proc.Name()]; ok && expectedFile != "" {
 			expectedPath := filepath.Join(e.expectedOutputsDir, expectedFile)
 			if expectedData, err := os.ReadFile(expectedPath); err == nil {
 				procResult.OutputMatch, procResult.OutputDiff = domain.ComputeOutputDiff(string(expectedData), procResult.Stdout)
