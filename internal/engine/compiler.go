@@ -28,7 +28,6 @@ type CompileEngine struct {
 	workers        int
 	tempDir        string
 	outputDir      string
-	shortNames     bool
 	cachedLibFiles []string
 	cachedLibDir   string
 	cachedLibWarn  []string
@@ -42,10 +41,6 @@ func WithWorkers(n int) CompileOption {
 
 func WithOutputDir(dir string) CompileOption {
 	return func(e *CompileEngine) { e.outputDir = dir }
-}
-
-func WithShortNames(enabled bool) CompileOption {
-	return func(e *CompileEngine) { e.shortNames = enabled }
 }
 
 func NewCompileEngine(p *policy.Policy, opts ...CompileOption) (*CompileEngine, error) {
@@ -122,14 +117,7 @@ func (e *CompileEngine) compile(ctx context.Context, sub domain.Submission) doma
 		baseDir = e.outputDir
 	}
 
-	dirName := sub.ID
-	if e.shortNames {
-		if idx := strings.Index(dirName, "_"); idx > 0 {
-			dirName = dirName[:idx]
-		}
-	}
-
-	outputDir := filepath.Join(baseDir, dirName)
+	outputDir := filepath.Join(baseDir, sub.ID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return domain.NewCompileResult(false, nil, "", err.Error(), time.Since(start).Milliseconds(), false)
 	}
@@ -211,10 +199,7 @@ func (e *CompileEngine) runGCC(ctx context.Context, sub domain.Submission, outpu
 	}
 }
 
-// compileExecutable links the policy library objects only when the source
-// actually includes one of the library headers. A submission that never
-// references the library implemented the functions itself; linking the
-// provided objects on top would only produce duplicate-symbol errors.
+// Links the policy library objects only when the source includes a library header.
 func (e *CompileEngine) compileExecutable(ctx context.Context, sub domain.Submission, outputDir string, sourceFiles, libraryFiles []string, libDir, outputPath string) gccRun {
 	libs := libraryFiles
 	if !sourcesIncludeLibrary(sourceFiles, libraryFiles) {
@@ -228,9 +213,7 @@ func (e *CompileEngine) compileExecutable(ctx context.Context, sub domain.Submis
 	return e.runGCC(ctx, sub, outputDir, libDir, args)
 }
 
-// sourcesIncludeLibrary reports whether any source file #includes one of the
-// policy's library headers. With no headers among the library files there is
-// nothing to detect, so the library is always linked.
+// With no headers among the library files there is nothing to detect: always link.
 func sourcesIncludeLibrary(sourceFiles, libraryFiles []string) bool {
 	var headers []string
 	for _, lib := range libraryFiles {

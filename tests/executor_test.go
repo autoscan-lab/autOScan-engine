@@ -12,8 +12,7 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
-// Prints its args and echoes the first line of stdin, so a test can assert
-// exactly what the executor passed in.
+// Prints its args and echoes the first line of stdin.
 const printerSource = `#include <stdio.h>
 int main(int argc, char **argv) {
 	for (int i = 1; i < argc; i++) printf("arg:%s\n", argv[i]);
@@ -55,8 +54,6 @@ func executorPolicy(configDir string, sourceFiles ...string) *policy.Policy {
 	}
 }
 
-// compileAndExecutor compiles the submission into a shared binary dir and
-// returns an executor rooted there, mirroring how grade.go wires the two.
 func compileAndExecutor(t *testing.T, p *policy.Policy, sub domain.Submission) *engine.Executor {
 	t.Helper()
 
@@ -72,7 +69,7 @@ func compileAndExecutor(t *testing.T, p *policy.Policy, sub domain.Submission) *
 		t.Fatalf("compile failed: %s", results[0].Stderr)
 	}
 
-	return engine.NewExecutorWithOptions(p, binDir, false)
+	return engine.NewExecutor(p, binDir)
 }
 
 func TestScenarioArgsAndStdinReachProcess(t *testing.T) {
@@ -122,9 +119,7 @@ func TestNoScenarioRunsBare(t *testing.T) {
 
 func TestScenarioDelayStaggersProcessStart(t *testing.T) {
 	requireTool(t, "gcc")
-	// No valgrind requirement: StartedAt is stamped after the delay, before
-	// the execution preflight, so the ordering holds even when running the
-	// binary itself fails.
+	// No valgrind needed: StartedAt is stamped before the execution preflight.
 
 	sub := writeSubmission(t, filepath.Join(t.TempDir(), "student"), map[string]string{
 		"first.c":  trivialSource,

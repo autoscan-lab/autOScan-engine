@@ -92,11 +92,6 @@ func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg
 	return prints
 }
 
-func ComputeSimilarityForProcess(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
-	prints := FingerprintSubmissions(submissions, srcFile, cfg)
-	return ComputeSimilarityFromFingerprints(submissions, prints, srcFile, cfg)
-}
-
 // ComputeSimilarityFromFingerprints runs the pairwise comparison over a
 // precomputed set of fingerprints (index-aligned with submissions).
 func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {

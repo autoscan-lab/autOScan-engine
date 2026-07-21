@@ -127,39 +127,26 @@ type Executor struct {
 	outputName         string
 	testFilesDir       string
 	expectedOutputsDir string
-	shortNames         bool
 }
 
-func NewExecutorWithOptions(p *policy.Policy, binaryDir string, shortNames bool) *Executor {
-	outputName := strings.TrimSuffix(p.Compile.SourceFile, ".c")
+func NewExecutor(p *policy.Policy, binaryDir string) *Executor {
 	configDir := p.EffectiveConfigDir()
 
 	return &Executor{
 		policy:             p,
 		binaryDir:          binaryDir,
-		outputName:         outputName,
+		outputName:         strings.TrimSuffix(p.Compile.SourceFile, ".c"),
 		testFilesDir:       filepath.Join(configDir, "test_files"),
 		expectedOutputsDir: filepath.Join(configDir, "expected_outputs"),
-		shortNames:         shortNames,
 	}
-}
-
-func (e *Executor) submissionDirName(sub domain.Submission) string {
-	dirName := sub.ID
-	if e.shortNames {
-		if idx := strings.Index(dirName, "_"); idx > 0 {
-			dirName = dirName[:idx]
-		}
-	}
-	return dirName
 }
 
 func (e *Executor) GetBinaryPath(sub domain.Submission) string {
-	return filepath.Join(e.binaryDir, e.submissionDirName(sub), e.outputName)
+	return filepath.Join(e.binaryDir, sub.ID, e.outputName)
 }
 
 func (e *Executor) GetSubmissionBinaryDir(sub domain.Submission) string {
-	return filepath.Join(e.binaryDir, e.submissionDirName(sub))
+	return filepath.Join(e.binaryDir, sub.ID)
 }
 
 func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []string, input string) domain.ExecuteResult {

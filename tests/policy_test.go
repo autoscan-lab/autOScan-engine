@@ -8,8 +8,7 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
-// The multi-process contract the app writes: executables are bare source
-// files (process name = stem), and args/stdin/delays live on scenarios.
+// The multi-process shape the app writes.
 const scenarioPolicyYaml = `name: S4_BC
 compile:
   gcc: gcc

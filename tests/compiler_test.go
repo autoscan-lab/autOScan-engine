@@ -20,14 +20,13 @@ const libSource = `#include <unistd.h>
 char *readUntil(int fd, char end) { (void)fd; (void)end; return 0; }
 `
 
-// A submission that never includes the library header: it implemented the
-// function itself, so the library objects must not be linked.
+// Reimplements the library function without including its header.
 const selfContainedSource = `#include <unistd.h>
 char *readUntil(int fd, char end) { (void)fd; (void)end; return 0; }
 int main(void) { return readUntil(0, '\n') == 0 ? 0 : 1; }
 `
 
-// A submission that includes the library header and relies on its object.
+// Includes the library header and relies on its object.
 const libUserSource = `#include "lib.h"
 int main(void) { return readUntil(0, '\n') == 0 ? 0 : 1; }
 `
@@ -215,8 +214,7 @@ func TestSingleProcessCompileSkipsLibraryWhenNotIncluded(t *testing.T) {
 	}
 }
 
-// A commented-out include must not count as using the library; if the engine
-// linked it anyway, the duplicate readUntil would fail the build.
+// A commented-out include must not count as using the library.
 func TestCommentedIncludeDoesNotLinkLibrary(t *testing.T) {
 	if _, err := exec.LookPath("gcc"); err != nil {
 		t.Skip("gcc not available")
@@ -235,7 +233,6 @@ func TestCommentedIncludeDoesNotLinkLibrary(t *testing.T) {
 	}
 }
 
-// Angle-bracket includes resolve through -I to the library dir and must link.
 func TestAngleBracketIncludeLinksLibrary(t *testing.T) {
 	if _, err := exec.LookPath("gcc"); err != nil {
 		t.Skip("gcc not available")
@@ -254,8 +251,7 @@ func TestAngleBracketIncludeLinksLibrary(t *testing.T) {
 	}
 }
 
-// With no headers among the library files there is nothing to detect, so the
-// objects are always linked; a submission relying on them must still build.
+// A header-less library can't be detected, so it is always linked.
 func TestLibraryWithoutHeadersAlwaysLinks(t *testing.T) {
 	if _, err := exec.LookPath("gcc"); err != nil {
 		t.Skip("gcc not available")

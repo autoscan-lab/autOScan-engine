@@ -37,15 +37,13 @@ type MultiProcessConfig struct {
 	TestScenarios []MultiProcessScenario `yaml:"test_scenarios,omitempty"`
 }
 
-// ProcessConfig only carries the source file an executable compiles from. Args,
-// stdin, start delays, and expected outputs all live on the scenarios that run
-// them, keyed by Name().
+// One executable per source file; args, stdin, delays, and expected outputs
+// live on scenarios, keyed by Name().
 type ProcessConfig struct {
 	SourceFile string `yaml:"source_file"`
 }
 
-// Name identifies the process everywhere (scenario keys, results, compile
-// sections): the source file's stem, e.g. "S4_client.c" -> "S4_client".
+// Name is the source file's stem ("S4_client.c" -> "S4_client").
 func (p ProcessConfig) Name() string {
 	return strings.TrimSuffix(filepath.Base(p.SourceFile), ".c")
 }

@@ -108,7 +108,7 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 	resp := buildBaseResponse(report)
 	resp.SourceFile = loadedPolicy.Compile.SourceFile
 
-	executor := engine.NewExecutorWithOptions(loadedPolicy, binaryDir, false)
+	executor := engine.NewExecutor(loadedPolicy, binaryDir)
 
 	// Test/multi-process execution is the long phase and runs sequentially, so
 	// each finished submission advances the bar for real.
