@@ -119,8 +119,6 @@ func runBasePath(cfg config, runID string) (string, error) {
 
 const runRetention = 7 * 24 * time.Hour
 
-// pruneOldRuns deletes run directories older than runRetention so the data
-// volume does not fill over time.
 func pruneOldRuns(cfg config) {
 	runsDir := filepath.Join(cfg.dataDir, runsDirName)
 	entries, err := os.ReadDir(runsDir)

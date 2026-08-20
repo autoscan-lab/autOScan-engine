@@ -23,10 +23,6 @@ func cleanSubmissionDirName(name string) string {
 	return cleaned
 }
 
-// buildAndUploadExport builds a zip of binaryDir (one folder per submission,
-// each containing the compiled binary and a copy of every policy test file —
-// valgrind logs are skipped) and uploads it to the given R2 key. The local zip
-// file is removed after upload.
 func buildAndUploadExport(ctx context.Context, cfg config, binaryDir string, p *policy.Policy, exportKey string) error {
 	if err := copyTestFilesIntoSubmissions(binaryDir, p); err != nil {
 		return fmt.Errorf("copying test files: %w", err)

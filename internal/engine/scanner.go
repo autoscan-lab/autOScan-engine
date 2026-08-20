@@ -14,7 +14,6 @@ import (
 	"github.com/smacker/go-tree-sitter/c"
 )
 
-// ScanEngine scans source files for banned function calls using tree-sitter.
 type ScanEngine struct {
 	policy    *policy.Policy
 	bannedSet map[string]struct{}
@@ -22,7 +21,6 @@ type ScanEngine struct {
 	lang      *sitter.Language
 }
 
-// NewScanEngine creates a new scan engine.
 func NewScanEngine(p *policy.Policy) *ScanEngine {
 	parser := sitter.NewParser()
 	lang := c.GetLanguage()
@@ -36,7 +34,6 @@ func NewScanEngine(p *policy.Policy) *ScanEngine {
 	}
 }
 
-// ScanAll scans all submissions in parallel.
 func (e *ScanEngine) ScanAll(submissions []domain.Submission, onComplete func(domain.Submission, domain.ScanResult)) []domain.ScanResult {
 	results := make([]domain.ScanResult, len(submissions))
 
@@ -64,7 +61,7 @@ func (e *ScanEngine) ScanAll(submissions []domain.Submission, onComplete func(do
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Create a parser per worker (tree-sitter parsers aren't thread-safe)
+			// One parser per worker; tree-sitter parsers are not thread-safe.
 			parser := sitter.NewParser()
 			parser.SetLanguage(e.lang)
 
@@ -87,7 +84,6 @@ func (e *ScanEngine) ScanAll(submissions []domain.Submission, onComplete func(do
 	return results
 }
 
-// scanWithParser scans a submission using the provided parser.
 func (e *ScanEngine) scanWithParser(parser *sitter.Parser, sub domain.Submission) domain.ScanResult {
 	var allHits []domain.BannedHit
 	var parseErrors []string
@@ -129,12 +125,10 @@ func (e *ScanEngine) walkTree(node *sitter.Node, content []byte, lines []string,
 		return
 	}
 
-	// Check if this is a call expression
 	if node.Type() == "call_expression" {
 		e.checkCallExpression(node, content, lines, fileName, hits)
 	}
 
-	// Recurse into children
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		e.walkTree(child, content, lines, fileName, hits)
@@ -142,7 +136,6 @@ func (e *ScanEngine) walkTree(node *sitter.Node, content []byte, lines []string,
 }
 
 func (e *ScanEngine) checkCallExpression(node *sitter.Node, content []byte, lines []string, fileName string, hits *[]domain.BannedHit) {
-	// Get the function being called (first child is usually the function identifier)
 	if node.ChildCount() == 0 {
 		return
 	}
@@ -156,18 +149,15 @@ func (e *ScanEngine) checkCallExpression(node *sitter.Node, content []byte, line
 
 	switch funcNode.Type() {
 	case "identifier":
-		// Direct function call: printf(...)
 		funcName = funcNode.Content(content)
 	case "field_expression":
-		// Member access: obj.method(...) - get the field name
 		if funcNode.ChildCount() >= 3 {
-			field := funcNode.Child(2) // Usually: object . field
+			field := funcNode.Child(2) // grammar shape: object . field
 			if field != nil && field.Type() == "field_identifier" {
 				funcName = field.Content(content)
 			}
 		}
 	default:
-		// Other cases (function pointers, etc.) - skip for now
 		return
 	}
 
@@ -175,16 +165,13 @@ func (e *ScanEngine) checkCallExpression(node *sitter.Node, content []byte, line
 		return
 	}
 
-	// Check if this function is banned
 	if _, banned := e.bannedSet[funcName]; banned {
-		line := int(funcNode.StartPoint().Row) + 1 // 1-based
+		line := int(funcNode.StartPoint().Row) + 1
 		col := int(funcNode.StartPoint().Column) + 1
 
-		// Get snippet (the line containing the call)
 		snippet := ""
 		if line-1 < len(lines) {
 			snippet = strings.TrimSpace(lines[line-1])
-			// Truncate long snippets
 			if len(snippet) > 80 {
 				snippet = snippet[:77] + "..."
 			}

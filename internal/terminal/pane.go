@@ -12,9 +12,6 @@ import (
 	"github.com/creack/pty"
 )
 
-// ServePane opens one pane on the session and pumps its PTY over the
-// WebSocket until the shell exits, the connection drops, or the session tears
-// down. It owns the pane's slot: every exit path detaches.
 func ServePane(conn *websocket.Conn, ts *Session) {
 	master, ctl, _, err := OpenPane(ts.ctlPath, 80, 24)
 	if err != nil {
@@ -38,7 +35,6 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 		})
 	}
 
-	// Session teardown ends this pane with the session's reason.
 	go func() {
 		select {
 		case <-ts.done:
@@ -47,9 +43,7 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 		}
 	}()
 
-	// pane-host reports the shell's exit over the control connection — the
-	// master alone would never EOF while a background student process still
-	// holds the PTY slave open.
+	// The master alone would never EOF while a background process still holds the PTY slave open.
 	go func() {
 		reader := bufio.NewReader(ctl)
 		for {
@@ -66,7 +60,6 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 		}
 	}()
 
-	// Shell output → socket.
 	go func() {
 		buf := make([]byte, 16<<10)
 		for {
@@ -84,7 +77,6 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 		}
 	}()
 
-	// Keepalive through proxies; also detects vanished clients.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -101,8 +93,7 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 		}
 	}()
 
-	// Socket → shell. Binary frames are raw input; text frames are control
-	// messages (resize). Only real input resets the session idle timer.
+	// Binary frames are raw input; text frames are control messages (resize).
 	conn.SetReadLimit(1 << 20)
 	for {
 		kind, data, readErr := conn.Read(ctx)

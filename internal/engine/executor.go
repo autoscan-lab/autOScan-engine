@@ -16,11 +16,9 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
-// DefaultExecTimeout caps how long a single submission process may run.
 const DefaultExecTimeout = 10 * time.Second
 
-// MinimalEnv returns a scrubbed environment for child processes, so untrusted
-// submission code cannot inherit the server's secrets.
+// MinimalEnv is scrubbed so untrusted submission code cannot inherit the server's secrets.
 func MinimalEnv(homeDir string) []string {
 	return []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -30,11 +28,8 @@ func MinimalEnv(homeDir string) []string {
 	}
 }
 
-// maxCapturedOutput caps buffered stdout/stderr per process so a submission
-// cannot exhaust server memory by printing without bound.
 const maxCapturedOutput = 1 << 20
 
-// cappedBuffer collects output up to limit bytes, then drops the rest.
 type cappedBuffer struct {
 	buf       bytes.Buffer
 	limit     int
@@ -87,9 +82,7 @@ func killProcessGroup(cmd *exec.Cmd) error {
 	return cmd.Process.Kill()
 }
 
-// crashReasonFromExit describes how a process was killed by a fatal signal, or
-// returns "" if it was not. A timeout kill is not treated as a crash. The
-// sandbox chain reports signals as a 128+signal exit code.
+// The sandbox chain reports fatal signals as a 128+signal exit code.
 func crashReasonFromExit(err error, timedOut bool) string {
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok {
@@ -285,8 +278,6 @@ func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult 
 	return domain.ParseValgrindLog(string(data), logPath)
 }
 
-// resolveTestFilePaths replaces args that exactly match a declared test file
-// with their full path in ~/.config/autoscan/test_files/
 func (e *Executor) resolveTestFilePaths(args []string) []string {
 	if len(e.policy.TestFiles) == 0 {
 		return args
@@ -316,10 +307,6 @@ func (e *Executor) ExecuteMultiProcessScenario(ctx context.Context, sub domain.S
 	return e.executeMultiProcessWithOverrides(ctx, sub, &scenario)
 }
 
-// executeMultiProcessWithOverrides runs each configured executable as its own
-// process. Processes run concurrently, with stdout/stderr buffered in memory.
-// The function blocks until every process finishes (or ctx is cancelled) and
-// returns a single MultiProcessResult — there is no live progress callback.
 func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub domain.Submission, scenario *policy.MultiProcessScenario) *domain.MultiProcessResult {
 	config := e.policy.Run.MultiProcess
 	if config == nil || len(config.Executables) == 0 {
@@ -367,8 +354,6 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 	return result
 }
 
-// runOneProcess executes a single process from a multi-process config, buffering
-// its stdout/stderr and recording the outcome on procResult.
 func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, proc policy.ProcessConfig, args []string, input string, delayMs int, scenario *policy.MultiProcessScenario, procResult *domain.ProcessResult) {
 	if delayMs > 0 {
 		select {

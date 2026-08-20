@@ -18,8 +18,6 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
 )
 
-// sandboxSourceFile is the synthetic per-submission source the sandbox builds by
-// concatenating a submission's .c/.h files. Both analyses compare this file.
 const sandboxSourceFile = "__sandbox.c"
 
 var submissionArchiveExts = []string{".tar.gz", ".tgz", ".tar", ".zip"}
@@ -50,10 +48,6 @@ type sandboxAnalyzeResponse struct {
 	Summary     sandboxSummary            `json:"summary"`
 }
 
-// sandboxAnalyze runs similarity + AI detection on an ad-hoc upload not tied to
-// any lab/policy. The upload is a zip whose entries are per-submission archives
-// (.zip/.tar/.tar.gz); each submission's .c/.h files are concatenated into one
-// source both analyses compare. Stateless — nothing is persisted.
 func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -118,7 +112,6 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fingerprint each submission once; similarity and AI detection share it.
 	progress.report(0.35, "Fingerprinting submissions")
 	prints := engine.FingerprintSubmissions(submissions, sandboxSourceFile, defaultCompareConfig)
 
@@ -152,8 +145,6 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// sandboxAIDictionary downloads the global ai_dictionary.yaml from R2 and loads
-// it. The sandbox isn't tied to a lab, so it can't rely on an active config.
 func sandboxAIDictionary(ctx context.Context, cfg config, workDir string) (*aipkg.Dictionary, error) {
 	r2, err := newR2Client(ctx, cfg)
 	if err != nil {
@@ -170,7 +161,6 @@ func sandboxAIDictionary(ctx context.Context, cfg config, workDir string) (*aipk
 	return aipkg.LoadDictionary(dictPath)
 }
 
-// extractArchive unpacks a .zip / .tar / .tar.gz / .tgz into dest.
 func extractArchive(archivePath, dest string) error {
 	lower := strings.ToLower(archivePath)
 	switch {
@@ -185,8 +175,6 @@ func extractArchive(archivePath, dest string) error {
 	}
 }
 
-// extractTar unpacks a tar (optionally gzip-compressed) into dest, guarding
-// against path traversal and capping decompressed bytes like extractZip.
 func extractTar(archivePath, dest string, gz bool) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
@@ -260,8 +248,6 @@ func extractTar(archivePath, dest string, gz bool) error {
 	return nil
 }
 
-// discoverSandboxSubmissions treats each inner archive in srcDir as one
-// submission, extracts it, and concatenates its .c/.h files into one source.
 func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []sandboxSubmissionSource, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return nil, nil, err
@@ -278,8 +264,6 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 		if d.IsDir() || !isSubmissionArchive(path) {
 			return nil
 		}
-		// Identify a submission by its containing directory (one dir per
-		// student); fall back to the archive name only when it sits at the root.
 		id := submissionID(path)
 		if rel, relErr := filepath.Rel(srcDir, filepath.Dir(path)); relErr == nil &&
 			rel != "." && rel != "" {
@@ -298,7 +282,7 @@ func discoverSandboxSubmissions(srcDir, destDir string) ([]domain.Submission, []
 			return err
 		}
 		if combined == "" {
-			return nil // no .c/.h files in this submission
+			return nil
 		}
 		if err := os.WriteFile(filepath.Join(subDir, sandboxSourceFile), []byte(combined), 0o644); err != nil {
 			return err
@@ -345,11 +329,7 @@ func submissionID(path string) string {
 	return name
 }
 
-// concatCSources reads every .c/.h file under dir (sorted) and joins them into
-// a single source blob. It also returns a manifest mapping each original file to
-// the 1-based line range its content occupies in the blob (the same coordinate
-// the analyzers report span lines in), so the UI can remap the blob back to a
-// per-file tree and route spans to files.
+// The manifest's 1-based line ranges use the same coordinates the analyzers report span lines in.
 func concatCSources(dir string) (string, []sandboxFile, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -372,7 +352,7 @@ func concatCSources(dir string) (string, []sandboxFile, error) {
 
 	var b strings.Builder
 	manifest := make([]sandboxFile, 0, len(files))
-	line := 1 // 1-based line where the next written character begins
+	line := 1
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -381,13 +361,10 @@ func concatCSources(dir string) (string, []sandboxFile, error) {
 		rel, _ := filepath.Rel(dir, f)
 		rel = filepath.ToSlash(rel)
 
-		// Marker comment occupies one line; the file's content starts on the next.
 		b.WriteString("/* ==== " + rel + " ==== */\n")
 		line++
 
 		src := string(data)
-		// Lines the content occupies once the trailing newline is added below: the
-		// newline count, plus one for a final unterminated (or empty) line.
 		contentLines := strings.Count(src, "\n")
 		if len(src) == 0 || !strings.HasSuffix(src, "\n") {
 			contentLines++

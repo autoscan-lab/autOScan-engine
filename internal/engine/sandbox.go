@@ -16,8 +16,6 @@ const (
 	prlimitCmd = "prlimit"
 )
 
-// Resource ceilings for sandboxed processes. The wall-clock timeout is the
-// primary bound; these stop a submission exhausting the host another way.
 const (
 	limitCPUSeconds = 20
 	limitFileBytes  = 256 << 20
@@ -26,24 +24,19 @@ const (
 	cgroupMemBytes  = 512 << 20
 )
 
-// memoryCgroupRoot is the v1 memory controller cgroup hierarchy.
 const memoryCgroupRoot = "/sys/fs/cgroup/memory"
 
-// sandboxSpec describes one sandboxed invocation.
 type sandboxSpec struct {
-	workDir  string   // bound read-write; the process's working directory
-	readOnly []string // extra host paths bound read-only
-	netAdmin bool     // grant ambient CAP_NET_ADMIN so the payload can raise loopback
+	workDir  string
+	readOnly []string
+	netAdmin bool
 }
 
-// sandboxAvailable reports whether the bubblewrap launcher is installed. When
-// it is not, callers run the command directly without the sandbox.
 func sandboxAvailable() bool {
 	_, err := exec.LookPath(bubblewrap)
 	return err == nil
 }
 
-// existingPaths returns the non-empty paths that exist on disk.
 func existingPaths(paths ...string) []string {
 	var out []string
 	for _, p := range paths {
@@ -57,24 +50,15 @@ func existingPaths(paths ...string) []string {
 	return out
 }
 
-// sandboxCommand builds the argv to run cmd inside bubblewrap with resource
-// InteractiveSandbox builds the argv and cleanup to run an interactive command
-// (e.g. a shell on a PTY) inside the same bubblewrap sandbox used for graded
-// submissions: workDir bound read-write, no network, prlimit + memory cgroup
-// ceilings. sandboxed is false when bubblewrap is unavailable, in which case
-// the caller should run cmd directly.
 func InteractiveSandbox(workDir string, cmd []string) (argv []string, cleanup func(), sandboxed bool) {
 	if !sandboxAvailable() {
 		return cmd, func() {}, false
 	}
-	// netAdmin lets the session's pane-host bring the namespace's loopback up
-	// so student processes in different panes can talk over 127.0.0.1.
+	// netAdmin lets pane-host raise the namespace loopback so panes can talk over 127.0.0.1.
 	argv, cleanup = sandboxCommand(sandboxSpec{workDir: workDir, netAdmin: true}, cmd)
 	return argv, cleanup, true
 }
 
-// sandboxCommand builds the argv to run cmd inside bubblewrap with resource
-// limits and a memory cgroup. cleanup must be called once the process exits.
 func sandboxCommand(spec sandboxSpec, cmd []string) (argv []string, cleanup func()) {
 	argv = sandboxArgv(spec, cmd)
 	cleanup = func() {}
@@ -85,8 +69,7 @@ func sandboxCommand(spec sandboxSpec, cmd []string) (argv []string, cleanup func
 	return argv, cleanup
 }
 
-// removeCgroup deletes the cgroup, retrying briefly: rmdir fails with EBUSY
-// while the kernel is still reaping the sandboxed process tree.
+// rmdir fails with EBUSY while the kernel is still reaping the sandboxed process tree.
 func removeCgroup(dir string) {
 	for i := 0; i < 50; i++ {
 		if err := os.Remove(dir); err == nil || os.IsNotExist(err) {
@@ -96,10 +79,6 @@ func removeCgroup(dir string) {
 	}
 }
 
-// sandboxArgv wraps cmd to run inside bubblewrap: only /usr (plus usr-merge
-// symlinks), a private /proc, /dev, /tmp and the spec's paths are visible, and
-// every namespace is unshared so there is no network. When prlimit is present
-// the call is also given CPU, file-size, fd and process ceilings.
 func sandboxArgv(spec sandboxSpec, cmd []string) []string {
 	argv := []string{
 		bubblewrap,
@@ -112,8 +91,7 @@ func sandboxArgv(spec sandboxSpec, cmd []string) []string {
 		"--symlink", "usr/lib64", "/lib64",
 		"--proc", "/proc",
 		"--dev", "/dev",
-		// POSIX message queues need an mqueue mount; bwrap's --dev provides
-		// /dev/shm (POSIX shm/semaphores) but no mqueue instance.
+		// bwrap's --dev provides /dev/shm but no mqueue instance.
 		"--mqueue", "/dev/mqueue",
 		"--tmpfs", "/tmp",
 	}
@@ -139,9 +117,6 @@ func sandboxArgv(spec sandboxSpec, cmd []string) []string {
 	return argv
 }
 
-// newMemoryCgroup creates a v1 memory cgroup capped at cgroupMemBytes. ok is
-// false when v1 memory cgroups are unavailable, in which case callers proceed
-// without a memory cap.
 func newMemoryCgroup() (dir, procsFile string, ok bool) {
 	if _, err := os.Stat(memoryCgroupRoot); err != nil {
 		return "", "", false
@@ -162,8 +137,6 @@ func newMemoryCgroup() (dir, procsFile string, ok bool) {
 	return dir, filepath.Join(dir, "cgroup.procs"), true
 }
 
-// cgroupJoinArgv prepends a shell that moves itself into the cgroup, then
-// execs argv — so the process and all its descendants run under the cgroup.
 func cgroupJoinArgv(procsFile string, argv []string) []string {
 	script := "echo $$ > " + procsFile + `; exec "$@"`
 	return append([]string{"sh", "-c", script, "sh"}, argv...)

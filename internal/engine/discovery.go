@@ -67,7 +67,6 @@ func (e *DiscoveryEngine) Discover(root string) ([]domain.Submission, error) {
 	return submissions, nil
 }
 
-// checkLeafFolder returns true if dir has no non-hidden subdirectories.
 func (e *DiscoveryEngine) checkLeafFolder(dir string) (bool, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -24,9 +24,6 @@ type setupResult struct {
 	ConfigDir       string `json:"config_dir"`
 }
 
-// setupAssignment downloads the global files + the assignment prefix from R2,
-// validates that policy.yml is present, then atomically swaps the result into
-// the active config dir.
 func setupAssignment(ctx context.Context, cfg config, r2 *r2Client, assignment string) (*setupResult, error) {
 	staging := filepath.Join(cfg.dataDir, ".staging-"+assignment)
 	if err := os.RemoveAll(staging); err != nil {
@@ -84,8 +81,6 @@ func downloadGlobals(ctx context.Context, r2 *r2Client, dest string) ([]string, 
 	return downloaded, nil
 }
 
-// activateStaging atomically swaps cfg.currentDir for staging, keeping the
-// previous version as a backup that is restored if anything fails midway.
 func activateStaging(cfg config, staging string) error {
 	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
 		return err
@@ -129,8 +124,6 @@ func ensureActiveConfig(cfg config) error {
 	return nil
 }
 
-// extractZip unpacks archivePath into targetDir, rejecting any entry whose
-// resolved path escapes the target directory.
 func extractZip(archivePath, targetDir string) error {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return err

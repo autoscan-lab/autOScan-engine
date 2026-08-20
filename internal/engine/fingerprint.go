@@ -14,7 +14,6 @@ import (
 	"github.com/smacker/go-tree-sitter/c"
 )
 
-// FingerprintFile parses a C file and creates a fingerprint.
 func FingerprintFile(path string, cfg domain.CompareConfig) (domain.FileFingerprint, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {

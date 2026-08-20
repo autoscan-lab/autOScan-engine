@@ -27,8 +27,7 @@ func NewExecutor(p *policy.Policy, binaryDir string) *Executor {
 	return internalengine.NewExecutor(p, binaryDir)
 }
 
-// SubmissionFingerprint lets callers fingerprint submissions once and feed the
-// result to both similarity and AI detection instead of fingerprinting twice.
+// SubmissionFingerprint lets callers fingerprint once and share the result across similarity and AI detection.
 type SubmissionFingerprint = internalengine.SubmissionFingerprint
 
 func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) []SubmissionFingerprint {

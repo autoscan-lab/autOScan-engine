@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-// progressTracker holds best-effort progress for in-flight /grade and
-// /sandbox/analyze requests, keyed by a caller-supplied opaque token
-// (progress_token form field). Entries live only in this process's memory —
-// the web app polls GET /progress/{token} while its synchronous engine call
-// is in flight, and a missing token just means "no progress to show".
 type progressTracker struct {
 	mu      sync.Mutex
 	entries map[string]progressEntry
@@ -34,7 +29,6 @@ func newProgressTracker() *progressTracker {
 	return &progressTracker{entries: map[string]progressEntry{}}
 }
 
-// validProgressToken keeps tokens to simple opaque ids (the app sends UUIDs).
 func validProgressToken(token string) bool {
 	if token == "" || len(token) > progressTokenMaxLen {
 		return false
@@ -59,7 +53,6 @@ func (t *progressTracker) set(token string, fraction float64, stage string) {
 		fraction = prev.fraction
 	}
 	t.entries[token] = progressEntry{fraction: fraction, stage: stage, updatedAt: time.Now()}
-	// Drop abandoned entries (client vanished mid-run) so the map can't grow.
 	for key, entry := range t.entries {
 		if time.Since(entry.updatedAt) > progressEntryTTL {
 			delete(t.entries, key)
@@ -67,8 +60,6 @@ func (t *progressTracker) set(token string, fraction float64, stage string) {
 	}
 }
 
-// finish marks an async job's terminal state; the entry then ages out via the
-// TTL so late polls still see the outcome.
 func (t *progressTracker) finish(token string, ok bool, detail string) {
 	if token == "" {
 		return
@@ -100,9 +91,6 @@ func (t *progressTracker) get(token string) (progressEntry, bool) {
 	return entry, ok
 }
 
-// progressReporter binds one request's token so pipeline code can report
-// without carrying the tracker and token around. A reporter whose request had
-// no (or an invalid) progress_token is a no-op.
 type progressReporter struct {
 	tracker *progressTracker
 	token   string
@@ -115,8 +103,7 @@ func (r progressReporter) report(fraction float64, stage string) {
 	r.tracker.set(r.token, fraction, stage)
 }
 
-// done removes the entry once the owning request finishes; the synchronous
-// response, not a 100% poll, is what tells the caller the run completed.
+// The synchronous response, not a 100% poll, tells the caller the run completed.
 func (r progressReporter) done() {
 	if r.tracker == nil || r.token == "" {
 		return
@@ -124,8 +111,7 @@ func (r progressReporter) done() {
 	r.tracker.drop(r.token)
 }
 
-// progressReporterFor reads the progress_token form field of an already-parsed
-// request. Callers must have run ParseMultipartForm/ParseForm first.
+// Callers must have run ParseMultipartForm/ParseForm before this reads the field.
 func (s *server) progressReporterFor(r *http.Request) progressReporter {
 	token := strings.TrimSpace(r.FormValue("progress_token"))
 	if !validProgressToken(token) {

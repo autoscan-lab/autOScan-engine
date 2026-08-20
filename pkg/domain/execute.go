@@ -213,7 +213,6 @@ func (m *MultiProcessResult) AddProcess(name string, result *ProcessResult) {
 	m.Processes[name] = result
 }
 
-// Computes output diff between expected and actual output
 func ComputeOutputDiff(expected, actual string) (OutputMatchStatus, []DiffLine) {
 	expected = strings.ReplaceAll(expected, "\r\n", "\n")
 	actual = strings.ReplaceAll(actual, "\r\n", "\n")

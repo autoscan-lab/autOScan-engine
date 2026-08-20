@@ -199,7 +199,6 @@ func (e *CompileEngine) runGCC(ctx context.Context, sub domain.Submission, outpu
 	}
 }
 
-// Links the policy library objects only when the source includes a library header.
 func (e *CompileEngine) compileExecutable(ctx context.Context, sub domain.Submission, outputDir string, sourceFiles, libraryFiles []string, libDir, outputPath string) gccRun {
 	libs := libraryFiles
 	if !sourcesIncludeLibrary(sourceFiles, libraryFiles) {

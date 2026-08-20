@@ -14,28 +14,22 @@ import (
 	"time"
 )
 
-// MaxPanesPerSession caps how many shells one session token can open. The
-// agent mirrors this as MAX_PANES in its /api/terminal route — change both
-// together (and mind Fly's connection hard_limit: 5 sessions × panes).
+// The agent mirrors this as MAX_PANES in its /api/terminal route — change both together.
 const MaxPanesPerSession = 4
 
 // Claims is the HMAC token payload the agent mints per terminal grant.
 type Claims struct {
 	RunID        string `json:"run_id"`
 	SubmissionID string `json:"submission_id"`
-	// Display label for the shell prompt (autoscan@<student>).
-	Student string `json:"student,omitempty"`
-	// Groups this token's WebSockets into one shared-sandbox session; legacy
-	// tokens without it get a private single-pane session.
-	SessionID string `json:"session_id,omitempty"`
-	Panes     int    `json:"panes,omitempty"`
-	Exp       int64  `json:"exp"`
+	Student      string `json:"student,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	Panes        int    `json:"panes,omitempty"`
+	Exp          int64  `json:"exp"`
 }
 
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// ParseToken validates "payload.sig" where payload is base64url JSON claims
-// and sig is base64url HMAC-SHA256(secret, payload).
+// Token format: "payload.sig" — base64url JSON claims plus base64url HMAC-SHA256(secret, payload), minted by the agent.
 func ParseToken(secret, token string) (Claims, error) {
 	payload, sig, ok := strings.Cut(token, ".")
 	if !ok || payload == "" || sig == "" {

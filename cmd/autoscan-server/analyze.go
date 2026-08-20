@@ -11,8 +11,6 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
 )
 
-// Defaults match conventional code-similarity tuning. Could be made
-// configurable via form fields later if needed.
 var defaultCompareConfig = domain.CompareConfig{
 	WindowSize:     5,
 	MinFuncTokens:  20,
@@ -28,7 +26,6 @@ type analysisOptions struct {
 	AIDetectionMinScore     float64
 }
 
-// runAnalysis computes similarity and/or AI detection from a run's submissions.
 func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission, opts analysisOptions) (*domain.SimilarityReport, *domain.AIDetectionReport, error) {
 	if !opts.IncludeSimilarity && !opts.IncludeAIDetection {
 		return nil, nil, nil
@@ -41,7 +38,6 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 	var sim *domain.SimilarityReport
 	var ai *domain.AIDetectionReport
 
-	// Fingerprint each submission once and share it across similarity + AI.
 	prints := engine.FingerprintSubmissions(submissions, sourceFile, defaultCompareConfig)
 
 	if opts.IncludeSimilarity {
@@ -126,4 +122,37 @@ func loadAIDictionary(cfg config) (*aipkg.Dictionary, error) {
 		return nil, fmt.Errorf("loading ai dictionary: %w", err)
 	}
 	return dict, nil
+}
+
+func countSimilarityPairs(report *domain.SimilarityReport) int {
+	if report == nil {
+		return 0
+	}
+	return len(report.Pairs)
+}
+
+func countFlaggedSimilarityPairs(report *domain.SimilarityReport) int {
+	if report == nil {
+		return 0
+	}
+	flagged := 0
+	for _, pair := range report.Pairs {
+		if pair.Flagged {
+			flagged++
+		}
+	}
+	return flagged
+}
+
+func countFlaggedAISubmissions(report *domain.AIDetectionReport) int {
+	if report == nil {
+		return 0
+	}
+	flagged := 0
+	for _, submission := range report.Submissions {
+		if submission.Flagged {
+			flagged++
+		}
+	}
+	return flagged
 }

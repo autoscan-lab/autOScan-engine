@@ -4,10 +4,7 @@ package terminal
 
 import "golang.org/x/sys/unix"
 
-// raiseLoopback brings lo up inside the sandbox's fresh network namespace so
-// panes can reach each other over 127.0.0.1. Needs the ambient CAP_NET_ADMIN
-// the engine grants via bwrap --cap-add; a no-op outside the sandbox where lo
-// is already up (SIOCSIFFLAGS with unchanged flags).
+// Needs the ambient CAP_NET_ADMIN the engine grants via bwrap --cap-add; a no-op where lo is already up.
 func raiseLoopback() error {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
 	if err != nil {
@@ -30,8 +27,6 @@ func raiseLoopback() error {
 	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifreq)
 }
 
-// dropAmbientCaps clears the ambient capability set so pane shells and student
-// processes inherit no capabilities.
 func dropAmbientCaps() {
 	_ = unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0)
 }

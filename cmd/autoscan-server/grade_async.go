@@ -17,18 +17,13 @@ import (
 
 const asyncGradeTimeout = 30 * time.Minute
 
-// asyncGradeResult is written to R2 at <result_key_prefix>/<run_id>/result.json:
-// the sync /grade response plus both analysis reports, so the caller collects
-// one finished payload instead of orchestrating the pipeline itself.
+// Written to R2 at <result_key_prefix>/<run_id>/result.json for the caller to collect.
 type asyncGradeResult struct {
 	*gradeResponse
 	Similarity  *domain.SimilarityReport  `json:"similarity,omitempty"`
 	AIDetection *domain.AIDetectionReport `json:"ai_detection,omitempty"`
 }
 
-// POST /grade with mode=async: validates, mints the run id, and returns 202
-// immediately; the full pipeline (setup → grade → analyses → result upload)
-// runs in a background job keyed by the run id in the progress tracker.
 func (s *server) gradeAsync(w http.ResponseWriter, r *http.Request) {
 	assignment := strings.TrimSpace(r.FormValue("assignment"))
 	if assignment == "" || strings.ContainsAny(assignment, "/\\") {
@@ -154,8 +149,7 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 		return err
 	}
 
-	// Analyses are best-effort, mirroring the previous caller-side orchestration:
-	// a failed analysis must not fail the graded run.
+	// A failed analysis must not fail the graded run.
 	progress.report(0.99, "Analyzing submissions")
 	result := asyncGradeResult{gradeResponse: resp}
 	if similarity, _, err := runAnalysis(s.cfg, resp.SourceFile, submissions, analysisOptions{
