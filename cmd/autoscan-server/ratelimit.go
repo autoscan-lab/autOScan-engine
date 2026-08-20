@@ -6,13 +6,11 @@ import (
 	"time"
 )
 
-// Global request limits for the secret-protected endpoints.
 const (
 	defaultRateLimitPerSecond = 5
 	defaultRateLimitBurst     = 10
 )
 
-// rateLimiter is a token bucket shared across all requests.
 type rateLimiter struct {
 	mu     sync.Mutex
 	tokens float64
@@ -30,7 +28,6 @@ func newRateLimiter(perSecond, burst float64) *rateLimiter {
 	}
 }
 
-// allow consumes a token and reports whether the request may proceed.
 func (rl *rateLimiter) allow() bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -49,7 +46,6 @@ func (rl *rateLimiter) allow() bool {
 	return false
 }
 
-// limitRequests rejects requests with 429 once the bucket is empty.
 func limitRequests(rl *rateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !rl.allow() {

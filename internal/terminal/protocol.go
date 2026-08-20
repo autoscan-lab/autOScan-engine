@@ -11,10 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Pane-host control protocol: newline-delimited JSON over the session's unix
-// socket, with the PTY master fd riding the reply as SCM_RIGHTS. Each control
-// connection is one pane's lifeline — closing it tears the pane down.
-
+// Control protocol: newline-delimited JSON over the session's unix socket; the PTY master fd rides the reply as SCM_RIGHTS.
 type paneOpen struct {
 	V    int    `json:"v"`
 	Cols uint16 `json:"cols"`
@@ -32,8 +29,6 @@ type paneEvent struct {
 	Code  int    `json:"code"`
 }
 
-// writePaneReply sends one newline-terminated JSON reply, attaching fd (the
-// PTY master) as SCM_RIGHTS when non-negative.
 func writePaneReply(conn *net.UnixConn, reply paneReply, fd int) error {
 	payload, err := json.Marshal(reply)
 	if err != nil {
@@ -56,8 +51,6 @@ func writePaneReply(conn *net.UnixConn, reply paneReply, fd int) error {
 	return err
 }
 
-// readPaneReply reads pane-host's newline-terminated JSON reply, collecting
-// any SCM_RIGHTS fds that ride along.
 func readPaneReply(conn *net.UnixConn) (paneReply, []int, error) {
 	buf := make([]byte, 4096)
 	oob := make([]byte, unix.CmsgSpace(4))
@@ -100,10 +93,7 @@ func readPaneReply(conn *net.UnixConn) (paneReply, []int, error) {
 	}
 }
 
-// OpenPane asks the pane-host behind ctlPath for a fresh shell PTY. It returns
-// the master (non-blocking, poller-registered so Close interrupts reads), the
-// control connection that acts as the pane's lifeline, and the shell's pid as
-// seen by pane-host.
+// The returned master is non-blocking and poller-registered so Close interrupts reads.
 func OpenPane(ctlPath string, cols, rows uint16) (*os.File, *net.UnixConn, int, error) {
 	addr := &net.UnixAddr{Name: ctlPath, Net: "unix"}
 	var (
@@ -121,7 +111,6 @@ func OpenPane(ctlPath string, cols, rows uint16) (*os.File, *net.UnixConn, int, 
 		return nil, nil, 0, err
 	}
 
-	// Bound the handshake so a wedged pane-host can't hang the caller.
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	payload, err := json.Marshal(paneOpen{V: 1, Cols: cols, Rows: rows})

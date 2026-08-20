@@ -9,18 +9,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
-	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
 const (
-	maxUploadBytes int64 = 256 * 1024 * 1024 // 256 MiB
+	maxUploadBytes int64 = 256 * 1024 * 1024
 )
 
 type httpError struct {
@@ -31,8 +28,7 @@ type httpError struct {
 func (e *httpError) Error() string { return e.msg }
 
 func main() {
-	// pane-host mode runs inside a terminal session's sandbox with no config
-	// or secrets — dispatch before loadConfig so it needs neither.
+	// pane-host mode runs with no config or secrets — dispatch before loadConfig.
 	if len(os.Args) >= 3 && os.Args[1] == "pane-host" {
 		os.Exit(terminal.RunPaneHost(os.Args[2]))
 	}
@@ -57,14 +53,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
-	mux.Handle("POST /setup/{assignment}", protected(srv.setup))
 	mux.Handle("POST /grade", protected(srv.grade))
-	mux.Handle("POST /analyze/similarity", protected(srv.analyzeSimilarity))
-	mux.Handle("POST /analyze/ai-detection", protected(srv.analyzeAIDetection))
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
 	mux.Handle("GET /progress/{token}", protected(srv.progressStatus))
-	// Token-authenticated (HMAC minted by the agent) instead of withSecret:
-	// the browser connects directly and cannot carry the engine secret.
+	// Token-authenticated instead of withSecret: the browser connects directly and cannot carry the engine secret.
 	mux.Handle("GET /terminal", limitRequests(limiter, http.HandlerFunc(srv.terminal)))
 
 	httpSrv := &http.Server{
@@ -94,10 +86,8 @@ func main() {
 
 type server struct {
 	cfg config
-	// mu serializes /setup against in-flight /grade and /analyze requests so
-	// the active config is never swapped mid-read.
-	mu sync.RWMutex
-	// progress tracks in-flight run progress for GET /progress/{token}.
+	// mu serializes a grade job's assignment setup against in-flight readers so the active config is never swapped mid-read.
+	mu       sync.RWMutex
 	progress *progressTracker
 }
 
@@ -105,147 +95,13 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *server) setup(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	assignment := strings.TrimSpace(r.PathValue("assignment"))
-	if assignment == "" || strings.ContainsAny(assignment, "/\\") {
-		writeError(w, &httpError{status: 400, msg: "invalid assignment name"})
-		return
-	}
-
-	r2, err := newR2Client(r.Context(), s.cfg)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	result, err := setupAssignment(r.Context(), s.cfg, r2, assignment)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	log.Printf("activated assignment %s with %d files", assignment, result.FilesDownloaded)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":           "ok",
-		"assignment":       result.Assignment,
-		"files_downloaded": result.FilesDownloaded,
-		"config_dir":       result.ConfigDir,
-	})
-}
-
 func (s *server) grade(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if err := ensureActiveConfig(s.cfg); err != nil {
-		writeError(w, err)
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, &httpError{status: 400, msg: "invalid multipart form: " + err.Error()})
 		return
 	}
-
-	r2Key := strings.TrimSpace(r.FormValue("r2_key"))
-	if r2Key == "" {
-		writeError(w, &httpError{status: 400, msg: "missing 'r2_key' field"})
-		return
-	}
-
-	progress := s.progressReporterFor(r)
-	defer progress.done()
-	progress.report(0.02, "Downloading submissions")
-
-	runID, err := newRunID()
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	runBase, err := runBasePath(s.cfg, runID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	cleanupRun := true
-	defer func() {
-		if cleanupRun {
-			_ = os.RemoveAll(runBase)
-		}
-	}()
-
-	if err := os.MkdirAll(runBase, 0o755); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	archivePath, err := runUploadPath(s.cfg, runID, filepath.Ext(r2Key))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	workspaceDir, err := runWorkspacePath(s.cfg, runID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	r2, err := newR2Client(r.Context(), s.cfg)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	found, err := r2.downloadObject(r.Context(), r2Key, archivePath)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if !found {
-		writeError(w, &httpError{status: 404, msg: "r2_key not found: " + r2Key})
-		return
-	}
-
-	progress.report(0.05, "Extracting submissions")
-	if err := extractZip(archivePath, workspaceDir); err != nil {
-		writeError(w, err)
-		return
-	}
-	_ = os.Remove(archivePath)
-
-	exportKey := ""
-	if prefix := strings.TrimSpace(r.FormValue("export_key_prefix")); prefix != "" {
-		exportKey = strings.TrimRight(prefix, "/") + "/" + runID + "/export.zip"
-	}
-	resp, err := runGradingPipeline(r.Context(), s.cfg, workspaceDir, exportKey, progress)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	resp.RunID = runID
-
-	submissions := make([]domain.Submission, len(resp.Results))
-	for index, result := range resp.Results {
-		submissions[index] = result.Submission
-	}
-	if err := saveRunState(s.cfg, runState{
-		RunID:       runID,
-		SourceFile:  resp.SourceFile,
-		Submissions: submissions,
-	}); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	cleanupRun = false
-	pruneOldRuns(s.cfg)
-
-	log.Printf("processed grading request run_id=%s with %d submissions", runID, len(resp.Results))
-	writeJSON(w, http.StatusOK, resp)
+	s.gradeAsync(w, r)
 }
 
 func withSecret(secret string, next http.Handler) http.Handler {

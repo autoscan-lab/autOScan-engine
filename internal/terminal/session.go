@@ -17,12 +17,6 @@ import (
 	internalengine "github.com/autoscan-lab/autoscan-engine/internal/engine"
 )
 
-// A terminal session is ONE scratch workspace + ONE sandbox (pane-host inside
-// it) shared by up to MaxPanesPerSession interactive shells, so student
-// processes started from different panes share mount/IPC/net/PID namespaces
-// and can talk over FIFOs, sockets, queues, and shared memory. Single-pane
-// terminals are simply N=1 sessions.
-
 const (
 	maxSessions      = 5
 	idleTimeout      = 10 * time.Minute
@@ -40,28 +34,27 @@ var (
 type Session struct {
 	id string
 
-	// Set during create(), immutable afterwards.
 	scratch   string
 	ctlPath   string
 	ctlAltDir string
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
-	cleanup   func() // memory-cgroup removal
+	cleanup   func()
 	maxPanes  int
 	idle      *time.Timer
 	lifetime  *time.Timer
 
-	ready     chan struct{} // closed when create() finishes (ok or not)
+	ready     chan struct{}
 	createErr error
-	procDone  chan struct{} // closed when the pane-host process exits
+	procDone  chan struct{}
 
-	mu         sync.Mutex
-	panes      int
-	closed     bool
-	lingering  *time.Timer
-	reason     string
+	mu        sync.Mutex
+	panes     int
+	closed    bool
+	lingering *time.Timer
+	reason    string
 
-	done      chan struct{} // closed at teardown; pane pumps watch it
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -72,10 +65,6 @@ var sessions = struct {
 	m map[string]*Session
 }{m: map[string]*Session{}}
 
-// Join returns the live session for the token's session id, creating it on
-// first join (buildScratch supplies the workspace copy), and reserves one pane
-// slot. The one-retry loop covers the narrow race where a session tears down
-// between lookup and attach — the retry then creates a fresh one.
 func Join(claims Claims, buildScratch func() (string, error)) (*Session, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		ts, creator, err := getOrCreate(claims)
@@ -125,8 +114,6 @@ func getOrCreate(claims Claims) (ts *Session, creator bool, err error) {
 	return ts, true, nil
 }
 
-// create builds the scratch copy and starts the sandboxed pane-host. Runs
-// outside the registry lock; joiners wait on ts.ready.
 func (ts *Session) create(student string, buildScratch func() (string, error)) {
 	defer close(ts.ready)
 
@@ -152,15 +139,12 @@ func (ts *Session) create(student string, buildScratch func() (string, error)) {
 		ts.teardown("session time limit reached")
 	})
 
-	// Watchdog: pane-host dying (crash, sandbox kill) ends the session.
 	go func() {
 		<-ts.procDone
 		ts.teardown("session ended")
 	}()
 }
 
-// fail records the create error and removes the placeholder so the next
-// connect attempt starts fresh.
 func (ts *Session) fail(err error) {
 	ts.createErr = err
 	sessions.Lock()
@@ -170,10 +154,6 @@ func (ts *Session) fail(err error) {
 	sessions.Unlock()
 }
 
-// startPaneHost launches this binary in pane-host mode inside the interactive
-// sandbox (or raw when bubblewrap is unavailable) and waits for its readiness
-// line. The control socket lives inside the scratch dir so both sides of the
-// bind mount reach the same inode.
 func (ts *Session) startPaneHost(student string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -185,9 +165,7 @@ func (ts *Session) startPaneHost(student string) error {
 		return err
 	}
 	ctlPath := filepath.Join(ctlDir, "ctl.sock")
-	// sun_path caps out around 104 bytes on darwin. Sandboxed scratches live
-	// under a short /tmp path, so this branch only triggers in dev, where a
-	// path outside the scratch works because there is no mount namespace.
+	// sun_path caps out around 104 bytes on darwin, so overlong paths fall back to a short /tmp dir.
 	if len(ctlPath) > 100 {
 		alt, err := os.MkdirTemp("/tmp", "ast-ctl-*")
 		if err != nil {
@@ -202,8 +180,7 @@ func (ts *Session) startPaneHost(student string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = ts.scratch
 	cmd.Env = shellEnv(ts.scratch, student)
-	// Own session+pgid: kill(-pid) reaps bwrap, its init, and pane-host; no
-	// engine controlling TTY ever leaks into the sandbox.
+	// Own session+pgid so kill(-pid) reaps bwrap, its init, and pane-host.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	stdin, err := cmd.StdinPipe()
@@ -276,8 +253,6 @@ func (ts *Session) startPaneHost(student string) error {
 	return errors.New("pane-host did not become ready")
 }
 
-// attach reserves one pane slot; fails when the session is over capacity or
-// already tearing down.
 func (ts *Session) attach() error {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -295,8 +270,6 @@ func (ts *Session) attach() error {
 	return nil
 }
 
-// detach releases a pane slot; the last pane out arms the linger timer instead
-// of tearing down immediately, so staggered connects and reconnects survive.
 func (ts *Session) detach() {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -308,8 +281,6 @@ func (ts *Session) detach() {
 	}
 }
 
-// touch resets the shared idle timer; any pane's keystrokes keep the whole
-// session alive.
 func (ts *Session) touch() {
 	if ts.idle != nil {
 		ts.idle.Reset(idleTimeout)
@@ -325,8 +296,6 @@ func (ts *Session) closeReason() string {
 	return ts.reason
 }
 
-// teardown ends the session exactly once: registry removal first (so a
-// concurrent join creates a fresh session), then panes, then the sandbox.
 func (ts *Session) teardown(reason string) {
 	ts.closeOnce.Do(func() {
 		ts.mu.Lock()
@@ -349,10 +318,9 @@ func (ts *Session) teardown(reason string) {
 		}
 		sessions.Unlock()
 
-		// Every pane pump watches this and closes its WS + fds.
 		close(ts.done)
 
-		// Graceful first: stdin EOF makes pane-host HUP its shells and exit.
+		// Stdin EOF makes pane-host HUP its shells and exit gracefully.
 		if ts.stdin != nil {
 			_ = ts.stdin.Close()
 		}
@@ -382,7 +350,6 @@ func (ts *Session) teardown(reason string) {
 	})
 }
 
-// TeardownAll ends every live session (server shutdown).
 func TeardownAll(reason string) {
 	sessions.Lock()
 	all := make([]*Session, 0, len(sessions.m))
@@ -396,8 +363,6 @@ func TeardownAll(reason string) {
 	}
 }
 
-// shellEnv is the grading env plus the two interactive-shell extras. Bash
-// keeps an inherited PS1 because no rc files exist in the sandbox.
 func shellEnv(homeDir, student string) []string {
 	return append(
 		internalengine.MinimalEnv(homeDir),
@@ -406,7 +371,6 @@ func shellEnv(homeDir, student string) []string {
 	)
 }
 
-// promptLabel reduces a student display name to a safe prompt token.
 func promptLabel(student string) string {
 	var out []rune
 	for _, r := range strings.ToLower(strings.TrimSpace(student)) {

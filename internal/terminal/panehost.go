@@ -17,14 +17,6 @@ import (
 	"github.com/creack/pty"
 )
 
-// RunPaneHost is the terminal session's payload — it runs inside the session's
-// bubblewrap sandbox when available, raw in dev. It owns every pane's bash:
-// the engine connects per pane over the unix control socket, sends the initial
-// size, and receives the PTY master fd back via SCM_RIGHTS.
-//
-// Inside the sandbox, bwrap's own init is PID 1 (it reaps orphans); pane-host
-// is a normal process, so losing it kills the namespace and every pane with it.
-
 // ReadyLine is printed on stdout once the control socket is listening.
 const ReadyLine = "PANEHOST_READY"
 
@@ -32,9 +24,7 @@ func RunPaneHost(ctlPath string) int {
 	log.SetPrefix("pane-host: ")
 	log.SetFlags(0)
 
-	// Namespace prep: loopback up for 127.0.0.1 between panes, then drop the
-	// ambient CAP_NET_ADMIN before any shell starts. Loopback failure is not
-	// fatal — FIFOs, unix sockets, and SysV IPC still work without it.
+	// Raise loopback, then drop ambient CAP_NET_ADMIN before any shell starts.
 	if err := raiseLoopback(); err != nil {
 		log.Printf("loopback: %v", err)
 	}
@@ -54,7 +44,7 @@ func RunPaneHost(ctlPath string) int {
 		os.Exit(0)
 	}
 
-	// stdin EOF means the engine (or the sandbox) went away: kill everything.
+	// stdin EOF means the engine (or the sandbox) went away.
 	go func() {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		shutdown()
@@ -67,7 +57,6 @@ func RunPaneHost(ctlPath string) int {
 		shutdown()
 	}()
 
-	// The engine waits for this line on stdout before dialing the socket.
 	fmt.Println(ReadyLine)
 
 	cwd, err := os.Getwd()
@@ -102,9 +91,6 @@ func (h *paneSet) remove(pid int) {
 	delete(h.procs, pid)
 }
 
-// killAll hangs up every pane shell (bash forwards SIGHUP to its jobs), then
-// force-kills the process groups shortly after. Only called on teardown, so
-// PID-reuse concerns don't apply — everything is going away.
 func (h *paneSet) killAll() {
 	h.mu.Lock()
 	procs := make([]*os.Process, 0, len(h.procs))
@@ -123,9 +109,6 @@ func (h *paneSet) killAll() {
 	}
 }
 
-// serve handles one pane: open request → bash on a fresh PTY → master fd back
-// to the engine → wait for either the shell to exit (report it) or the engine
-// to close the connection (hang up the shell).
 func (h *paneSet) serve(conn *net.UnixConn, cwd string) {
 	defer conn.Close()
 
@@ -157,7 +140,7 @@ func (h *paneSet) serve(conn *net.UnixConn, cwd string) {
 
 	pid := cmd.Process.Pid
 	replyErr := writePaneReply(conn, paneReply{OK: true, Pid: pid}, int(ptmx.Fd()))
-	// The engine holds its own copy of the master now (or the send failed).
+	// The engine holds its own copy of the master fd now (or the send failed).
 	_ = ptmx.Close()
 
 	exited := make(chan struct{})
@@ -176,8 +159,7 @@ func (h *paneSet) serve(conn *net.UnixConn, cwd string) {
 		return
 	}
 
-	// No further engine→pane-host traffic exists, so a Read unblocking means
-	// the connection closed (pane teardown).
+	// No further engine traffic exists, so a Read unblocking means the connection closed.
 	connClosed := make(chan struct{})
 	go func() {
 		_, _ = conn.Read(make([]byte, 1))
@@ -195,11 +177,7 @@ func (h *paneSet) serve(conn *net.UnixConn, cwd string) {
 	}
 }
 
-// hangupPane HUPs the shell's process group and escalates to SIGKILL if it is
-// still running two seconds later. Waiting on `exited` (not a bare timer)
-// before the KILL avoids signalling a reused PID; the post-KILL wait is
-// bounded because a shell wedged in the kernel's PTY-drain exit path (its
-// master fd still open elsewhere) cannot be forced from here.
+// Waiting on exited (not a bare timer) before the KILL avoids signalling a reused PID.
 func hangupPane(pid int, exited <-chan struct{}) {
 	_ = syscall.Kill(-pid, syscall.SIGHUP)
 	_ = syscall.Kill(pid, syscall.SIGHUP)

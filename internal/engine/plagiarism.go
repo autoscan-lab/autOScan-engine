@@ -39,8 +39,6 @@ func combinedSimilarityScore(windowScore, perFuncScore float64, functionCountA, 
 		return math.Max(0, math.Min(1, windowScore))
 	}
 
-	// Whole-file overlap is the stronger base signal; per-function overlap
-	// adds structural confidence without dominating the final score.
 	score := (0.65 * windowScore) + (0.35 * perFuncScore)
 	return math.Max(0, math.Min(1, score))
 }
@@ -64,7 +62,7 @@ func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch 
 		spansA := convertSpans(fpA, mergedA)
 		spansB := convertSpans(fpB, mergedB)
 		result = append(result, domain.WindowMatch{
-			Hash:   hash[:8], // First 8 chars for display
+			Hash:   hash[:8],
 			SpansA: spansA,
 			SpansB: spansB,
 		})
@@ -72,16 +70,12 @@ func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch 
 	return result
 }
 
-// SubmissionFingerprint is one submission's fingerprint, or the error that
-// prevented it. Computing these once lets similarity and AI detection share a
-// single fingerprint pass instead of each fingerprinting every submission.
 type SubmissionFingerprint struct {
 	FP  domain.FileFingerprint
 	Err error
 }
 
-// FingerprintSubmissions fingerprints each submission's srcFile once, in
-// parallel. The returned slice is index-aligned with submissions.
+// The returned slice is index-aligned with submissions.
 func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg domain.CompareConfig) []SubmissionFingerprint {
 	prints := make([]SubmissionFingerprint, len(submissions))
 	parallelForEach(len(submissions), func(i int) {
@@ -92,8 +86,6 @@ func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg
 	return prints
 }
 
-// ComputeSimilarityFromFingerprints runs the pairwise comparison over a
-// precomputed set of fingerprints (index-aligned with submissions).
 func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
 	report := domain.SimilarityReport{SourceFile: srcFile}
 

@@ -37,8 +37,6 @@ type MultiProcessConfig struct {
 	TestScenarios []MultiProcessScenario `yaml:"test_scenarios,omitempty"`
 }
 
-// One executable per source file; args, stdin, delays, and expected outputs
-// live on scenarios, keyed by Name().
 type ProcessConfig struct {
 	SourceFile string `yaml:"source_file"`
 }
@@ -60,9 +58,7 @@ type TestCase struct {
 	Name  string   `yaml:"name"`
 	Args  []string `yaml:"args"`
 	Input string   `yaml:"input"`
-	// ProducedFile, when set, makes the test compare the contents of this file
-	// (written by the student's program in its working directory) against
-	// ExpectedOutputFile, instead of comparing stdout.
+	// ProducedFile, when set, compares this file's contents against ExpectedOutputFile instead of stdout.
 	ProducedFile       string `yaml:"produced_file,omitempty"`
 	ExpectedOutputFile string `yaml:"expected_output_file,omitempty"`
 }
@@ -188,8 +184,7 @@ func (p *Policy) BannedSet() map[string]struct{} {
 	return set
 }
 
-// BuildGCCArgs constructs gcc arguments with proper ordering:
-// compiler flags -> source files -> library files (.c/.o only) -> linker flags (-l*) -> output
+// BuildGCCArgs orders args: compiler flags -> sources -> library .c/.o files -> linker -l flags -> output.
 func (p *Policy) BuildGCCArgs(sourceFiles []string, libraryFiles []string, outputPath string) []string {
 	var compilerFlags, linkerFlags []string
 

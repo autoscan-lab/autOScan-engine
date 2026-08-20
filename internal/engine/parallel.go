@@ -5,9 +5,7 @@ import (
 	"sync"
 )
 
-// parallelForEach runs fn(i) for each i in [0, n) using up to NumCPU workers.
-// fn must be safe to run concurrently: it should only write to per-index storage
-// (e.g. slots[i]) and read otherwise-immutable shared data, so there is no race.
+// fn must only write per-index storage and read otherwise-immutable shared data.
 func parallelForEach(n int, fn func(i int)) {
 	if n <= 0 {
 		return

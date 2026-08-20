@@ -25,9 +25,6 @@ type gradeResponse struct {
 	ExportUploaded bool                `json:"export_uploaded,omitempty"`
 }
 
-// submissionResult embeds the engine's SubmissionResult so the response
-// mirrors the engine shape directly: submission, compile, scan, status —
-// then we add server-only fields (source_files, tests, multi_process).
 type submissionResult struct {
 	domain.SubmissionResult
 	SourceFiles  []sourceFile                 `json:"source_files,omitempty"`
@@ -40,9 +37,6 @@ type sourceFile struct {
 	Content string `json:"content"`
 }
 
-// Fractions of the whole /grade request each pipeline phase occupies; the
-// download/extract steps before the pipeline own 0–0.08. Execution dominates
-// real runs, so it gets most of the bar.
 const (
 	gradeCompileStart = 0.08
 	gradeCompileEnd   = 0.30
@@ -50,9 +44,6 @@ const (
 	gradeExecuteEnd   = 0.98
 )
 
-// runGradingPipeline drives discovery → compile → scan → run-all-test-cases
-// against the workspace, producing a single canonical response. Compilation
-// happens once per submission; every test case reuses the resulting binary.
 func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey string, progress progressReporter) (*gradeResponse, error) {
 	policyPath := filepath.Join(cfg.currentDir, policyFileName)
 
@@ -78,8 +69,7 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 	}
 	defer runner.Cleanup()
 
-	// Per-submission compile progress. total is written before CompileAll spawns
-	// its workers; compiled counts callbacks arriving from those workers.
+	// total is written before CompileAll spawns its workers, so the callbacks read it safely.
 	var total int
 	var compiled atomic.Int64
 	report, err := runner.Run(ctx, rootPath, engine.RunnerCallbacks{
@@ -110,8 +100,6 @@ func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey
 
 	executor := engine.NewExecutor(loadedPolicy, binaryDir)
 
-	// Test/multi-process execution is the long phase and runs sequentially, so
-	// each finished submission advances the bar for real.
 	executed := 0
 	reportExecuted := func() {
 		executed++
@@ -197,9 +185,6 @@ func runTestCases(
 	}
 }
 
-// runMultiProcess executes a multi-process policy for one submission. If the
-// policy defines TestScenarios, each scenario produces one MultiProcessResult.
-// Otherwise the executables run once with their default args/inputs.
 func runMultiProcess(
 	ctx context.Context,
 	executor *engine.Executor,
@@ -238,8 +223,6 @@ func buildTestCasePayload(index int, tc policy.TestCase, result domain.ExecuteRe
 	return result.TestCaseResult("", index, expectedOutput)
 }
 
-// loadExpectedOutputs reads every referenced expected_output_file once so we
-// don't re-read it per submission.
 func loadExpectedOutputs(loadedPolicy *policy.Policy) map[string]*string {
 	out := make(map[string]*string)
 	configDir := loadedPolicy.EffectiveConfigDir()

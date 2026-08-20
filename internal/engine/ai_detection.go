@@ -13,9 +13,6 @@ type dictionaryFingerprint struct {
 	fp    domain.FileFingerprint
 }
 
-// ComputeAIDetectionFromFingerprints scores each submission against the AI
-// dictionary using a precomputed set of fingerprints (index-aligned with
-// submissions).
 func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
 	report := domain.AIDetectionReport{
 		SourceFile: srcFile,

@@ -15,17 +15,6 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
-// Interactive terminal: bash PTYs inside the grading sandbox, scoped to a
-// scratch copy of one graded submission, streamed over WebSockets. Panes of
-// the same token share one sandbox (internal/terminal) so student processes
-// can IPC across panes.
-//
-// Auth: the agent mints a short-lived HMAC token (signed with ENGINE_SECRET)
-// binding {run_id, submission_id, session_id, panes, exp}; the browser opens
-// one WebSocket per pane with it. Sessions run on a scratch copy so the graded
-// workspace — which /analyze/* re-reads — is never mutated.
-
-// copyTree copies regular files and directories from src into dst.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -50,8 +39,6 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// copyFilesNoClobber copies src's regular files flat into dst, skipping names
-// that already exist (student files win over policy companions).
 func copyFilesNoClobber(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
@@ -79,8 +66,6 @@ func copyFilesNoClobber(src, dst string) error {
 	return nil
 }
 
-// buildTerminalScratch copies the submission plus the active policy's library
-// and test files into a fresh temp dir the session can freely mutate.
 func buildTerminalScratch(cfg config, sub domain.Submission) (string, error) {
 	scratch, err := os.MkdirTemp("", "autoscan-term-*")
 	if err != nil {
@@ -106,7 +91,6 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the submission before upgrading so failures are plain HTTP.
 	state, err := loadRunState(s.cfg, claims.RunID)
 	if err != nil {
 		writeError(w, err)
@@ -137,14 +121,13 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Token-gated only; the short-lived signed token is the credential.
+	// Token-gated only; the short-lived signed token is the credential, so no origin check.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return
 	}
 
-	// The scratch copy reads the active config, so it takes the same read
-	// lock /grade and /analyze use against /setup swaps.
+	// The scratch build takes the same read lock /grade and /analyze use against /setup swaps.
 	ts, err := terminal.Join(claims, func() (string, error) {
 		s.mu.RLock()
 		defer s.mu.RUnlock()

@@ -33,7 +33,6 @@ func newR2Client(_ context.Context, c config) (*r2Client, error) {
 	return &r2Client{client: client, bucket: c.r2BucketName}, nil
 }
 
-// uploadObject uploads a local file to the given R2 key.
 func (r *r2Client) uploadObject(ctx context.Context, key, localPath, contentType string) error {
 	opts := minio.PutObjectOptions{}
 	if contentType != "" {
@@ -60,8 +59,6 @@ func (r *r2Client) downloadObject(ctx context.Context, key, localPath string) (b
 	return true, nil
 }
 
-// downloadPrefix fetches every object under prefix into destDir, preserving
-// the relative key structure. Returns the list of downloaded keys.
 func (r *r2Client) downloadPrefix(ctx context.Context, prefix, destDir string) ([]string, error) {
 	var keys []string
 	for obj := range r.client.ListObjects(ctx, r.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
