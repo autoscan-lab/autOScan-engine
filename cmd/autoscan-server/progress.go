@@ -20,6 +20,8 @@ type progressTracker struct {
 type progressEntry struct {
 	fraction  float64
 	stage     string
+	state     string // "" while running; "done" or "failed" once an async job ends
+	detail    string
 	updatedAt time.Time
 }
 
@@ -63,6 +65,26 @@ func (t *progressTracker) set(token string, fraction float64, stage string) {
 			delete(t.entries, key)
 		}
 	}
+}
+
+// finish marks an async job's terminal state; the entry then ages out via the
+// TTL so late polls still see the outcome.
+func (t *progressTracker) finish(token string, ok bool, detail string) {
+	if token == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[token]
+	if ok {
+		entry.fraction = 1
+		entry.state = "done"
+	} else {
+		entry.state = "failed"
+		entry.detail = detail
+	}
+	entry.updatedAt = time.Now()
+	t.entries[token] = entry
 }
 
 func (t *progressTracker) drop(token string) {
@@ -123,8 +145,17 @@ func (s *server) progressStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{status: 404, msg: "unknown progress token"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	state := entry.state
+	if state == "" {
+		state = "running"
+	}
+	body := map[string]any{
 		"fraction": entry.fraction,
 		"stage":    entry.stage,
-	})
+		"state":    state,
+	}
+	if entry.detail != "" {
+		body["detail"] = entry.detail
+	}
+	writeJSON(w, http.StatusOK, body)
 }

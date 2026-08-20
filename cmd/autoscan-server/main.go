@@ -137,17 +137,22 @@ func (s *server) setup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) grade(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, &httpError{status: 400, msg: "invalid multipart form: " + err.Error()})
+		return
+	}
+
+	if strings.TrimSpace(r.FormValue("mode")) == "async" {
+		s.gradeAsync(w, r)
+		return
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if err := ensureActiveConfig(s.cfg); err != nil {
 		writeError(w, err)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeError(w, &httpError{status: 400, msg: "invalid multipart form: " + err.Error()})
 		return
 	}
 
