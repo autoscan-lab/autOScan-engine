@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	maxSessions      = 5
-	idleTimeout      = 10 * time.Minute
-	maxLifetime      = 45 * time.Minute
-	linger           = 60 * time.Second
-	readyTimeout     = 15 * time.Second
+	maxSessions  = 5
+	idleTimeout  = 10 * time.Minute
+	maxLifetime  = 45 * time.Minute
+	linger       = 60 * time.Second
+	readyTimeout = 15 * time.Second
 )
 
 var (

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/engine"
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
@@ -68,32 +69,10 @@ func copyTestFilesIntoSubmissions(binaryDir string, p *policy.Policy) error {
 				continue
 			}
 			dst := filepath.Join(submissionDir, name)
-			if err := copyFile(src, dst); err != nil {
+			if err := engine.CopyFile(src, dst); err != nil {
 				return fmt.Errorf("copying %s into %s: %w", name, entry.Name(), err)
 			}
 		}
-	}
-	return nil
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
 	}
 	return nil
 }

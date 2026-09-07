@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,12 +146,14 @@ func (e *Executor) GetSubmissionBinaryDir(sub domain.Submission) string {
 func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []string, input string) domain.ExecuteResult {
 	binaryPath := e.GetBinaryPath(sub)
 	binaryDir := filepath.Dir(binaryPath)
-	resolvedArgs := e.resolveTestFilePaths(args)
+	if err := e.stageTestFiles(binaryDir); err != nil {
+		return domain.NewExecuteResult(false, "", err.Error(), 0, false, args, input)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, DefaultExecTimeout)
 	defer cancel()
 
-	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, resolvedArgs)
+	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
 	defer cleanup()
 	if preflightFailure != nil {
 		return domain.NewExecuteResult(false, "", preflightFailure.Message, 0, false, args, input).WithValgrind(preflightFailure)
@@ -189,6 +192,12 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 }
 
 func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, tc policy.TestCase) domain.ExecuteResult {
+	producedPath := ""
+	if tc.ProducedFile != "" {
+		// A file left behind by an earlier test case must not pass as this one's output.
+		producedPath = filepath.Join(e.GetSubmissionBinaryDir(sub), tc.ProducedFile)
+		_ = os.Remove(producedPath)
+	}
 	result := e.Execute(ctx, sub, tc.Args, tc.Input).WithTestCase(tc.Name)
 
 	if tc.ExpectedOutputFile == "" {
@@ -212,7 +221,6 @@ func (e *Executor) ExecuteTestCase(ctx context.Context, sub domain.Submission, t
 	if tc.ProducedFile != "" {
 		result.OutputSource = "file"
 		result.ProducedFile = tc.ProducedFile
-		producedPath := filepath.Join(e.GetSubmissionBinaryDir(sub), tc.ProducedFile)
 		producedData, readErr := os.ReadFile(producedPath)
 		if readErr != nil {
 			result.OutputMatch = domain.OutputMatchMissing
@@ -260,7 +268,7 @@ func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath s
 	cmdline := append([]string{valgrindPath}, valgrindArgs...)
 	cleanup := func() {}
 	if sandboxAvailable() {
-		spec := sandboxSpec{workDir: binaryDir, readOnly: existingPaths(e.testFilesDir)}
+		spec := sandboxSpec{workDir: binaryDir}
 		cmdline, cleanup = sandboxCommand(spec, cmdline)
 	}
 
@@ -278,25 +286,35 @@ func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult 
 	return domain.ParseValgrindLog(string(data), logPath)
 }
 
-func (e *Executor) resolveTestFilePaths(args []string) []string {
-	if len(e.policy.TestFiles) == 0 {
-		return args
-	}
-
-	testFileSet := make(map[string]bool, len(e.policy.TestFiles))
-	for _, tf := range e.policy.TestFiles {
-		testFileSet[tf] = true
-	}
-
-	resolved := make([]string, len(args))
-	for i, arg := range args {
-		if testFileSet[arg] {
-			resolved[i] = filepath.Join(e.testFilesDir, arg)
-		} else {
-			resolved[i] = arg
+// Every run gets a fresh, writable copy of each test file so programs can modify them without touching the shared config copy.
+func (e *Executor) stageTestFiles(dir string) error {
+	for _, name := range e.policy.TestFiles {
+		if err := CopyFile(filepath.Join(e.testFilesDir, name), filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("staging test file %s: %w", name, err)
 		}
 	}
-	return resolved
+	return nil
+}
+
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func (e *Executor) ExecuteMultiProcess(ctx context.Context, sub domain.Submission) *domain.MultiProcessResult {
@@ -318,6 +336,7 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 		result.ScenarioName = scenario.Name
 	}
 	start := time.Now()
+	stageErr := e.stageTestFiles(e.GetSubmissionBinaryDir(sub))
 
 	var wg sync.WaitGroup
 
@@ -332,13 +351,15 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 			delayMs = scenario.ProcessDelays[proc.Name()]
 		}
 
-		args = e.resolveTestFilePaths(args)
-
 		procResult := &domain.ProcessResult{
 			Name:       proc.Name(),
 			SourceFile: proc.SourceFile,
 		}
 		result.AddProcess(proc.Name(), procResult)
+		if stageErr != nil {
+			procResult.Stderr = stageErr.Error()
+			continue
+		}
 
 		wg.Add(1)
 		go func(proc policy.ProcessConfig, args []string, input string, delayMs int, procResult *domain.ProcessResult) {
