@@ -44,7 +44,7 @@ func main() {
 	}
 	pruneOldRuns(cfg)
 
-	srv := &server{cfg: cfg, progress: newProgressTracker()}
+	srv := &server{cfg: cfg, progress: newProgressTracker(), activity: newActivity()}
 
 	limiter := newRateLimiter(defaultRateLimitPerSecond, defaultRateLimitBurst)
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -54,6 +54,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
 	mux.Handle("POST /grade", protected(srv.grade))
+	mux.Handle("DELETE /grade/{run_id}", protected(srv.cancelGrade))
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
 	mux.Handle("GET /progress/{token}", protected(srv.progressStatus))
 	// Token-authenticated instead of withSecret: the browser connects directly and cannot carry the engine secret.
@@ -61,12 +62,16 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,
-		Handler:           logRequests(mux),
+		Handler:           trackRequests(srv.activity, logRequests(mux)),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if cfg.idleExit > 0 {
+		go exitWhenIdle(ctx, srv.activity, cfg.idleExit, stop)
+	}
 
 	go func() {
 		log.Printf("autoscan-server listening on :%s", cfg.port)
@@ -89,6 +94,9 @@ type server struct {
 	// mu serializes a grade job's assignment setup against in-flight readers so the active config is never swapped mid-read.
 	mu       sync.RWMutex
 	progress *progressTracker
+	activity *activity
+	// run id -> context.CancelFunc for in-flight async grade jobs.
+	jobs sync.Map
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

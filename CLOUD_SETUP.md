@@ -36,6 +36,11 @@ fly secrets import < .env
 fly deploy
 ```
 
+The machine is not auto-stopped by Fly's proxy (it can't see background grade
+jobs). Instead the server exits itself after `AUTOSCAN_IDLE_EXIT` (set in
+`fly.toml`) with no requests, grade jobs, or terminal sockets, and the proxy
+starts it again on the next request. Leave the variable unset locally to never exit.
+
 ## Endpoints
 
 - `GET  /health`
@@ -44,6 +49,7 @@ fly deploy
   per submission for multi-process policies)
 - `POST /analyze/similarity` — computes similarity for an existing `run_id`
 - `POST /analyze/ai-detection` — computes AI detection for an existing `run_id`
+- `DELETE /grade/{run_id}` — cancels an in-flight async grade job (404 once finished)
 - `POST /sandbox/analyze` — ad-hoc similarity + AI detection on a zip, no run state
 - `GET  /terminal` — WebSocket, one connection per shell pane; auth is a
   short-lived HMAC token minted by the web app (not the secret header). Panes

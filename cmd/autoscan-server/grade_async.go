@@ -48,22 +48,46 @@ func (s *server) gradeAsync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), asyncGradeTimeout)
+	s.jobs.Store(runID, cancel)
+	s.activity.begin()
 	s.progress.set(runID, 0.01, "Queued")
-	go s.runGradeJob(runID, assignment, r2Key, exportPrefix, resultPrefix)
+	go s.runGradeJob(ctx, cancel, runID, assignment, r2Key, exportPrefix, resultPrefix)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID})
 }
 
-func (s *server) runGradeJob(runID, assignment, r2Key, exportPrefix, resultPrefix string) {
-	ctx, cancel := context.WithTimeout(context.Background(), asyncGradeTimeout)
+func (s *server) runGradeJob(ctx context.Context, cancel context.CancelFunc, runID, assignment, r2Key, exportPrefix, resultPrefix string) {
+	defer s.activity.end()
+	defer s.jobs.Delete(runID)
 	defer cancel()
 
 	if err := s.executeGradeJob(ctx, runID, assignment, r2Key, exportPrefix, resultPrefix); err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			log.Printf("async grade run_id=%s cancelled", runID)
+			s.progress.finish(runID, false, "grading cancelled")
+			return
+		}
 		log.Printf("async grade run_id=%s failed: %v", runID, err)
 		s.progress.finish(runID, false, publicJobError(err))
 		return
 	}
 	s.progress.finish(runID, true, "")
+}
+
+func (s *server) cancelGrade(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	if !validProgressToken(runID) {
+		writeError(w, &httpError{status: 400, msg: "invalid run id"})
+		return
+	}
+	cancel, ok := s.jobs.Load(runID)
+	if !ok {
+		writeError(w, &httpError{status: 404, msg: "unknown run"})
+		return
+	}
+	cancel.(context.CancelFunc)()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, exportPrefix, resultPrefix string) error {
@@ -184,7 +208,7 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 }
 
 func uploadJSON(ctx context.Context, r2 *r2Client, key string, payload any) error {
-	body, err := json.MarshalIndent(payload, "", "  ")
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}

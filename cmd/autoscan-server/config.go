@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,6 +17,8 @@ type config struct {
 	currentDir   string
 	port         string
 	engineSecret string
+	// Zero disables idle exit (local runs).
+	idleExit time.Duration
 
 	r2AccountID  string
 	r2AccessKey  string
@@ -34,11 +37,14 @@ func loadConfig() config {
 		port = "8080"
 	}
 
+	idleExit, _ := time.ParseDuration(strings.TrimSpace(os.Getenv("AUTOSCAN_IDLE_EXIT")))
+
 	return config{
 		dataDir:      dataDir,
 		currentDir:   filepath.Join(dataDir, "current"),
 		port:         port,
 		engineSecret: os.Getenv("ENGINE_SECRET"),
+		idleExit:     idleExit,
 		r2AccountID:  os.Getenv("R2_ACCOUNT_ID"),
 		r2AccessKey:  os.Getenv("R2_ACCESS_KEY_ID"),
 		r2SecretKey:  os.Getenv("R2_SECRET_ACCESS_KEY"),

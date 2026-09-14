@@ -14,6 +14,9 @@ const (
 	OutputMatchMissing OutputMatchStatus = "missing" // Expected output file not found
 )
 
+// Runaway output (e.g. a menu looping on EOF) would otherwise emit one entry per captured line.
+const maxDiffLines = 500
+
 type DiffLine struct {
 	Type    string `json:"type"` // "same", "added", "removed"
 	Content string `json:"content"`
@@ -234,6 +237,10 @@ func ComputeOutputDiff(expected, actual string) (OutputMatchStatus, []DiffLine) 
 	}
 
 	for i := 0; i < maxLen; i++ {
+		if len(diff) >= maxDiffLines {
+			diff = append(diff, DiffLine{Type: "same", Content: "... [diff truncated]"})
+			break
+		}
 		var exp, act string
 		if i < len(expectedLines) {
 			exp = expectedLines[i]

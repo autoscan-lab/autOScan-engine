@@ -14,9 +14,18 @@ primary_region = 'ams'
   destination = '/data'
   processes = ['app']
 
+# The proxy's autostop can't see background grade jobs and would kill them mid-run,
+# so the server exits itself once idle (exit 0 + on-failure = machine stays stopped).
+[env]
+  AUTOSCAN_IDLE_EXIT = '5m'
+
+[[restart]]
+  policy = 'on-failure'
+  processes = ['app']
+
 [http_service]
   internal_port = 8080
-  auto_stop_machines = 'stop'
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']

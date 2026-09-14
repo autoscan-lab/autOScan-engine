@@ -29,7 +29,7 @@ func MinimalEnv(homeDir string) []string {
 	}
 }
 
-const maxCapturedOutput = 1 << 20
+const maxCapturedOutput = 64 << 10
 
 type cappedBuffer struct {
 	buf       bytes.Buffer
