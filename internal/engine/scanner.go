@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -102,7 +101,7 @@ func (e *ScanEngine) scanWithParser(parser *sitter.Parser, sub domain.Submission
 }
 
 func (e *ScanEngine) scanFileWithParser(parser *sitter.Parser, filePath, displayName string) ([]domain.BannedHit, error) {
-	content, err := os.ReadFile(filePath)
+	content, err := domain.ReadSourceFile(filePath)
 	if err != nil {
 		return nil, err
 	}

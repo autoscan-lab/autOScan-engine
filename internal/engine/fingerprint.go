@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -15,7 +14,7 @@ import (
 )
 
 func FingerprintFile(path string, cfg domain.CompareConfig) (domain.FileFingerprint, error) {
-	content, err := os.ReadFile(path)
+	content, err := domain.ReadSourceFile(path)
 	if err != nil {
 		return domain.FileFingerprint{}, err
 	}

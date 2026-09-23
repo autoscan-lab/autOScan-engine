@@ -250,7 +250,7 @@ func readSourceFiles(sub domain.Submission) []sourceFile {
 	sort.Strings(names)
 	for _, name := range names {
 		path := filepath.Join(sub.Path, name)
-		data, err := os.ReadFile(path)
+		data, err := domain.ReadSourceFile(path)
 		if err != nil {
 			continue
 		}
