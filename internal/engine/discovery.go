@@ -9,6 +9,9 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
+// macOSMetadataDir holds AppleDouble copies of every file in archives made by macOS "Compress".
+const macOSMetadataDir = "__MACOSX"
+
 type DiscoveryEngine struct {
 	policy *policy.Policy
 }
@@ -35,7 +38,7 @@ func (e *DiscoveryEngine) Discover(root string) ([]domain.Submission, error) {
 			return nil
 		}
 
-		if strings.HasPrefix(d.Name(), ".") && path != absRoot {
+		if (strings.HasPrefix(d.Name(), ".") || d.Name() == macOSMetadataDir) && path != absRoot {
 			return filepath.SkipDir
 		}
 
@@ -78,9 +81,14 @@ func (e *DiscoveryEngine) checkLeafFolder(dir string) (bool, []string, error) {
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			if !strings.HasPrefix(entry.Name(), ".") {
+			if !strings.HasPrefix(entry.Name(), ".") && entry.Name() != macOSMetadataDir {
 				hasSubdirs = true
 			}
+			continue
+		}
+
+		// AppleDouble "._name.c" files are macOS metadata, not source.
+		if strings.HasPrefix(entry.Name(), "._") {
 			continue
 		}
 
