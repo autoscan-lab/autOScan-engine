@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
@@ -127,25 +131,49 @@ func runBasePath(cfg config, runID string) (string, error) {
 	return filepath.Join(cfg.dataDir, runsDirName, normalizedRunID), nil
 }
 
-const runRetention = 7 * 24 * time.Hour
+// Runs are kept until the data disk passes this, then the oldest go first.
+const diskHighWater = 0.90
 
+// Never removes the newest run, so a just-graded run keeps its terminal.
 func pruneOldRuns(cfg config) {
 	runsDir := filepath.Join(cfg.dataDir, runsDirName)
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return
 	}
-	cutoff := time.Now().Add(-runRetention)
+	type storedRun struct {
+		path     string
+		modified time.Time
+	}
+	var stored []storedRun
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || info.ModTime().After(cutoff) {
+		if err != nil {
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(runsDir, entry.Name()))
+		stored = append(stored, storedRun{filepath.Join(runsDir, entry.Name()), info.ModTime()})
 	}
+	sort.Slice(stored, func(i, j int) bool { return stored[i].modified.Before(stored[j].modified) })
+
+	for i := 0; i < len(stored)-1; i++ {
+		used, ok := diskUsed(cfg.dataDir)
+		if !ok || used < diskHighWater {
+			return
+		}
+		log.Printf("data disk %.0f%% full, removing oldest run %s", used*100, filepath.Base(stored[i].path))
+		_ = os.RemoveAll(stored[i].path)
+	}
+}
+
+func diskUsed(dir string) (float64, bool) {
+	var fs unix.Statfs_t
+	if err := unix.Statfs(dir, &fs); err != nil || fs.Blocks == 0 {
+		return 0, false
+	}
+	return float64(fs.Blocks-fs.Bfree) / float64(fs.Blocks), true
 }
 
 func normalizeRunID(runID string) (string, error) {

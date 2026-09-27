@@ -57,7 +57,8 @@ starts it again on the next request. Leave the variable unset locally to never e
   of one token share a sandboxed session.
 
 Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
-the volume and keeps it with the run's workspace for 7 days, so a run's terminal
-always gets the libraries and test files it was graded with. The terminal token
+the volume and keeps it with the run's workspace, so a run's terminal always gets
+the libraries and test files it was graded with. Runs are never deleted by age:
+only once the volume passes 90% full are the oldest removed (never the newest). The terminal token
 also carries the assignment name, which the engine uses to fetch a run's config
 when it has none.
