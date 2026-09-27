@@ -26,7 +26,7 @@ type asyncGradeResult struct {
 
 func (s *server) gradeAsync(w http.ResponseWriter, r *http.Request) {
 	assignment := strings.TrimSpace(r.FormValue("assignment"))
-	if assignment == "" || strings.ContainsAny(assignment, "/\\") {
+	if !validAssignmentName(assignment) {
 		writeError(w, &httpError{status: 400, msg: "invalid assignment name"})
 		return
 	}
@@ -93,23 +93,15 @@ func (s *server) cancelGrade(w http.ResponseWriter, r *http.Request) {
 func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, exportPrefix, resultPrefix string) error {
 	progress := progressReporter{tracker: s.progress, token: runID}
 
+	select {
+	case s.gradeSlot <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-s.gradeSlot }()
+
 	r2, err := newR2Client(ctx, s.cfg)
 	if err != nil {
-		return err
-	}
-
-	progress.report(0.01, "Preparing assignment")
-	s.mu.Lock()
-	_, err = setupAssignment(ctx, s.cfg, r2, assignment)
-	s.mu.Unlock()
-	if err != nil {
-		return fmt.Errorf("setting up assignment: %w", err)
-	}
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if err := ensureActiveConfig(s.cfg); err != nil {
 		return err
 	}
 
@@ -125,6 +117,15 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 	}()
 	if err := os.MkdirAll(runBase, 0o755); err != nil {
 		return err
+	}
+
+	progress.report(0.01, "Preparing assignment")
+	configDir, err := runConfigPath(s.cfg, runID)
+	if err != nil {
+		return err
+	}
+	if err := fetchAssignmentConfig(ctx, r2, assignment, configDir); err != nil {
+		return fmt.Errorf("setting up assignment: %w", err)
 	}
 
 	archivePath, err := runUploadPath(s.cfg, runID, filepath.Ext(r2Key))
@@ -155,7 +156,7 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 	if exportPrefix != "" {
 		exportKey = strings.TrimRight(exportPrefix, "/") + "/" + runID + "/export.zip"
 	}
-	resp, err := runGradingPipeline(ctx, s.cfg, workspaceDir, exportKey, progress)
+	resp, err := runGradingPipeline(ctx, s.cfg, configDir, workspaceDir, exportKey, progress)
 	if err != nil {
 		return err
 	}
@@ -176,7 +177,7 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 	// A failed analysis must not fail the graded run.
 	progress.report(0.99, "Analyzing submissions")
 	result := asyncGradeResult{gradeResponse: resp}
-	if similarity, _, err := runAnalysis(s.cfg, resp.SourceFile, submissions, analysisOptions{
+	if similarity, _, err := runAnalysis(configDir, resp.SourceFile, submissions, analysisOptions{
 		IncludeSimilarity:      true,
 		SimilarityIncludeSpans: true,
 		SimilarityMinScore:     10,
@@ -185,7 +186,7 @@ func (s *server) executeGradeJob(ctx context.Context, runID, assignment, r2Key, 
 	} else {
 		result.Similarity = similarity
 	}
-	if _, detection, err := runAnalysis(s.cfg, resp.SourceFile, submissions, analysisOptions{
+	if _, detection, err := runAnalysis(configDir, resp.SourceFile, submissions, analysisOptions{
 		IncludeAIDetection:      true,
 		AIDetectionIncludeSpans: true,
 	}); err != nil {

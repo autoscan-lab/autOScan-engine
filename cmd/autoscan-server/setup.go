@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,108 +17,56 @@ const (
 	maxZipBytes   = 1 << 30 // 1 GiB decompressed
 )
 
-type setupResult struct {
-	Assignment      string `json:"assignment"`
-	FilesDownloaded int    `json:"files_downloaded"`
-	ConfigDir       string `json:"config_dir"`
+func validAssignmentName(name string) bool {
+	return name != "" && !strings.ContainsAny(name, "/\\")
 }
 
-func setupAssignment(ctx context.Context, cfg config, r2 *r2Client, assignment string) (*setupResult, error) {
-	staging := filepath.Join(cfg.dataDir, ".staging-"+assignment)
-	if err := os.RemoveAll(staging); err != nil {
-		return nil, fmt.Errorf("clearing staging dir: %w", err)
+// Downloads the globals and the assignment's R2 prefix into dest, which must not exist yet.
+// Staging then renaming keeps dest all-or-nothing when two callers race to create it.
+func fetchAssignmentConfig(ctx context.Context, r2 *r2Client, assignment, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
 	}
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		return nil, fmt.Errorf("creating staging dir: %w", err)
+	staging, err := os.MkdirTemp(filepath.Dir(dest), ".config-*")
+	if err != nil {
+		return err
 	}
 
 	// Globals first so per-lab files can override them.
-	globalKeys, err := downloadGlobals(ctx, r2, staging)
-	if err != nil {
+	if err := downloadGlobals(ctx, r2, staging); err != nil {
 		os.RemoveAll(staging)
-		return nil, err
+		return err
 	}
 
-	prefix := "assignments/" + assignment + "/"
-	keys, err := r2.downloadPrefix(ctx, prefix, staging)
+	keys, err := r2.downloadPrefix(ctx, "assignments/"+assignment+"/", staging)
 	if err != nil {
 		os.RemoveAll(staging)
-		return nil, err
+		return err
 	}
 	if len(keys) == 0 {
 		os.RemoveAll(staging)
-		return nil, &httpError{status: 404, msg: fmt.Sprintf("no files found for assignment %q", assignment)}
+		return &httpError{status: 404, msg: fmt.Sprintf("no files found for assignment %q", assignment)}
 	}
-
 	if _, err := os.Stat(filepath.Join(staging, policyFileName)); err != nil {
 		os.RemoveAll(staging)
-		return nil, &httpError{status: 400, msg: fmt.Sprintf("missing %s in assignment %q", policyFileName, assignment)}
+		return &httpError{status: 400, msg: fmt.Sprintf("missing %s in assignment %q", policyFileName, assignment)}
 	}
 
-	if err := activateStaging(cfg, staging); err != nil {
-		return nil, err
-	}
-
-	return &setupResult{
-		Assignment:      assignment,
-		FilesDownloaded: len(globalKeys) + len(keys),
-		ConfigDir:       cfg.currentDir,
-	}, nil
-}
-
-func downloadGlobals(ctx context.Context, r2 *r2Client, dest string) ([]string, error) {
-	var downloaded []string
-	for _, key := range globalFiles {
-		ok, err := r2.downloadObject(ctx, key, filepath.Join(dest, key))
-		if err != nil {
-			return nil, err
+	if err := os.Rename(staging, dest); err != nil {
+		os.RemoveAll(staging)
+		if _, statErr := os.Stat(filepath.Join(dest, policyFileName)); statErr == nil {
+			return nil
 		}
-		if ok {
-			downloaded = append(downloaded, key)
-		}
-	}
-	return downloaded, nil
-}
-
-func activateStaging(cfg config, staging string) error {
-	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
-		return err
-	}
-
-	backup := filepath.Join(cfg.dataDir, ".previous")
-	if err := os.RemoveAll(backup); err != nil {
-		return fmt.Errorf("clearing previous backup: %w", err)
-	}
-
-	currentExists := false
-	if _, err := os.Stat(cfg.currentDir); err == nil {
-		currentExists = true
-		if err := os.Rename(cfg.currentDir, backup); err != nil {
-			return fmt.Errorf("moving current to backup: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	if err := os.Rename(staging, cfg.currentDir); err != nil {
-		if currentExists {
-			_ = os.Rename(backup, cfg.currentDir)
-		}
-		return fmt.Errorf("activating staging: %w", err)
-	}
-
-	if currentExists {
-		_ = os.RemoveAll(backup)
+		return fmt.Errorf("activating assignment config: %w", err)
 	}
 	return nil
 }
 
-func ensureActiveConfig(cfg config) error {
-	if _, err := os.Stat(cfg.currentDir); err != nil {
-		return &httpError{status: 503, msg: "no active assignment configured"}
-	}
-	if _, err := os.Stat(filepath.Join(cfg.currentDir, policyFileName)); err != nil {
-		return &httpError{status: 503, msg: "active config is missing " + policyFileName}
+func downloadGlobals(ctx context.Context, r2 *r2Client, dest string) error {
+	for _, key := range globalFiles {
+		if _, err := r2.downloadObject(ctx, key, filepath.Join(dest, key)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -21,6 +21,7 @@ const MaxPanesPerSession = 4
 type Claims struct {
 	RunID        string `json:"run_id"`
 	SubmissionID string `json:"submission_id"`
+	Assignment   string `json:"assignment,omitempty"`
 	Student      string `json:"student,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
 	Panes        int    `json:"panes,omitempty"`

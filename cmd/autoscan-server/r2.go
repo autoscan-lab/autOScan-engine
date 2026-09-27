@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +22,17 @@ func newR2Client(_ context.Context, c config) (*r2Client, error) {
 		return nil, err
 	}
 
-	endpoint := fmt.Sprintf("%s.r2.cloudflarestorage.com", c.r2AccountID)
+	endpoint, secure := fmt.Sprintf("%s.r2.cloudflarestorage.com", c.r2AccountID), true
+	if c.r2Endpoint != "" {
+		parsed, err := url.Parse(c.r2Endpoint)
+		if err != nil || parsed.Host == "" {
+			return nil, fmt.Errorf("invalid R2_ENDPOINT %q", c.r2Endpoint)
+		}
+		endpoint, secure = parsed.Host, parsed.Scheme != "http"
+	}
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(c.r2AccessKey, c.r2SecretKey, ""),
-		Secure: true,
+		Secure: secure,
 		Region: "auto",
 	})
 	if err != nil {

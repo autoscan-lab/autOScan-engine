@@ -98,3 +98,17 @@ func TestParseTokenRejects(t *testing.T) {
 		t.Fatal("wrong signature should be rejected")
 	}
 }
+
+func TestParseTokenKeepsAssignment(t *testing.T) {
+	secret := "test-secret"
+	claims := validClaims()
+	claims.Assignment = "S2_BC"
+
+	got, err := terminal.ParseToken(secret, mintToken(t, secret, claims))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.Assignment != "S2_BC" {
+		t.Fatalf("assignment = %q, want S2_BC", got.Assignment)
+	}
+}

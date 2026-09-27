@@ -1,0 +1,13 @@
+name: S2 AICE
+compile:
+  gcc: gcc
+  flags: ["-Wall"]
+  source_file: S2.c
+library_files: ["aice_lib.c", "aice_lib.h"]
+test_files: ["aice_input.txt"]
+run:
+  test_cases:
+    - name: prints input
+      args: ["aice_input.txt"]
+      input: ""
+      expected_output_file: t1.txt

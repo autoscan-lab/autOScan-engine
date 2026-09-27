@@ -44,10 +44,10 @@ const (
 	gradeExecuteEnd   = 0.98
 )
 
-func runGradingPipeline(ctx context.Context, cfg config, workspaceDir, exportKey string, progress progressReporter) (*gradeResponse, error) {
-	policyPath := filepath.Join(cfg.currentDir, policyFileName)
+func runGradingPipeline(ctx context.Context, cfg config, configDir, workspaceDir, exportKey string, progress progressReporter) (*gradeResponse, error) {
+	policyPath := filepath.Join(configDir, policyFileName)
 
-	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(policyPath, cfg.currentDir)
+	loadedPolicy, err := policy.LoadWithGlobalsFromConfigDir(policyPath, configDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading policy: %w", err)
 	}

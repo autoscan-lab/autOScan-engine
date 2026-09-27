@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"log"
@@ -66,7 +67,7 @@ func copyFilesNoClobber(src, dst string) error {
 	return nil
 }
 
-func buildTerminalScratch(cfg config, sub domain.Submission) (string, error) {
+func buildTerminalScratch(configDir string, sub domain.Submission) (string, error) {
 	scratch, err := os.MkdirTemp("", "autoscan-term-*")
 	if err != nil {
 		return "", err
@@ -76,12 +77,34 @@ func buildTerminalScratch(cfg config, sub domain.Submission) (string, error) {
 		return "", err
 	}
 	for _, dir := range []string{"libraries", "test_files"} {
-		if err := copyFilesNoClobber(filepath.Join(cfg.currentDir, dir), scratch); err != nil {
+		if err := copyFilesNoClobber(filepath.Join(configDir, dir), scratch); err != nil {
 			_ = os.RemoveAll(scratch)
 			return "", err
 		}
 	}
 	return scratch, nil
+}
+
+// Runs graded before per-run configs existed have none, so fetch the assignment the token names.
+func (s *server) runConfig(ctx context.Context, claims terminal.Claims) (string, error) {
+	configDir, err := runConfigPath(s.cfg, claims.RunID)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(configDir); err == nil {
+		return configDir, nil
+	}
+	if !validAssignmentName(claims.Assignment) {
+		return "", &httpError{status: 410, msg: "run has no assignment config; re-run grading"}
+	}
+	r2, err := newR2Client(ctx, s.cfg)
+	if err != nil {
+		return "", err
+	}
+	if err := fetchAssignmentConfig(ctx, r2, claims.Assignment, configDir); err != nil {
+		return "", err
+	}
+	return configDir, nil
 }
 
 func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +143,11 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{status: 410, msg: "submission workspace expired; re-run grading"})
 		return
 	}
+	configDir, err := s.runConfig(r.Context(), claims)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 
 	// Token-gated only; the short-lived signed token is the credential, so no origin check.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
@@ -127,11 +155,8 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The scratch build takes the same read lock /grade and /analyze use against /setup swaps.
 	ts, err := terminal.Join(claims, func() (string, error) {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		return buildTerminalScratch(s.cfg, *sub)
+		return buildTerminalScratch(configDir, *sub)
 	})
 	if err != nil {
 		code := websocket.StatusInternalError

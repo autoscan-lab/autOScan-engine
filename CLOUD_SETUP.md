@@ -26,6 +26,9 @@ R2_BUCKET_NAME=your-bucket-name
 ENGINE_SECRET=your-shared-secret
 ```
 
+`R2_ENDPOINT` (optional) points the engine at another S3-compatible store, e.g.
+`http://localhost:9000` for local testing.
+
 ## 3. Deploy
 
 ```bash
@@ -44,29 +47,21 @@ starts it again on the next request. Leave the variable unset locally to never e
 ## Endpoints
 
 - `GET  /health`
-- `POST /setup/{assignment}` — loads policy from R2 (e.g. `/setup/<assignment-name>`)
-- `POST /grade` — accepts a zip, returns JSON results + `run_id` (+ `multi_process`
-  per submission for multi-process policies)
-- `POST /analyze/similarity` — computes similarity for an existing `run_id`
-- `POST /analyze/ai-detection` — computes AI detection for an existing `run_id`
-- `DELETE /grade/{run_id}` — cancels an in-flight async grade job (404 once finished)
-- `POST /sandbox/analyze` — ad-hoc similarity + AI detection on a zip, no run state
-- `GET  /terminal` — WebSocket, one connection per shell pane; auth is a
+- `POST /grade` - async grading: form fields `assignment`, `r2_key`,
+  `result_key_prefix`, `export_key_prefix`; returns `202 { run_id }` and writes
+  `<result_key_prefix>/<run_id>/result.json` when done. Jobs run one at a time;
+  later ones report the `Queued` stage until their turn.
+- `DELETE /grade/{run_id}` - cancels a queued or running grade job (404 once finished)
+- `GET  /progress/{token}` - `{ fraction, stage, state, detail? }` for a grade run id
+  or a sandbox progress token
+- `POST /sandbox/analyze` - ad-hoc similarity + AI detection on a zip, no run state
+- `GET  /terminal` - WebSocket, one connection per shell pane; auth is a
   short-lived HMAC token minted by the web app (not the secret header). Panes
   of one token share a sandboxed session.
 
-`/grade` only performs grading and stores run metadata for follow-up analysis.
-
-`/analyze/similarity` and `/analyze/ai-detection` accept JSON body:
-
-```json
-{
-  "run_id": "9be7e2b7718a5be4634de0db",
-  "include_spans": false,
-  "top_k": 25
-}
-```
-
-- `run_id` is required and must come from a previous `/grade` response.
-- `include_spans` defaults to `false` (summary payloads only).
-- `top_k` is optional; when set, trims the response to the top N entries.
+Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
+the volume and keeps it with the run's workspace, so a run's terminal always gets
+the libraries and test files it was graded with. Runs are never deleted by age:
+only once the volume passes 90% full are the oldest removed (never the newest). The terminal token
+also carries the assignment name, which the engine uses to fetch a run's config
+when it has none.

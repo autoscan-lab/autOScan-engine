@@ -26,7 +26,7 @@ type analysisOptions struct {
 	AIDetectionMinScore     float64
 }
 
-func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission, opts analysisOptions) (*domain.SimilarityReport, *domain.AIDetectionReport, error) {
+func runAnalysis(configDir, sourceFile string, submissions []domain.Submission, opts analysisOptions) (*domain.SimilarityReport, *domain.AIDetectionReport, error) {
 	if !opts.IncludeSimilarity && !opts.IncludeAIDetection {
 		return nil, nil, nil
 	}
@@ -50,7 +50,7 @@ func runAnalysis(cfg config, sourceFile string, submissions []domain.Submission,
 	}
 
 	if opts.IncludeAIDetection {
-		dict, err := loadAIDictionary(cfg)
+		dict, err := loadAIDictionary(configDir)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -109,11 +109,11 @@ func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, 
 	}
 }
 
-func loadAIDictionary(cfg config) (*aipkg.Dictionary, error) {
-	path := filepath.Join(cfg.currentDir, "ai_dictionary.yaml")
+func loadAIDictionary(configDir string) (*aipkg.Dictionary, error) {
+	path := filepath.Join(configDir, "ai_dictionary.yaml")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, &httpError{status: 503, msg: "no ai_dictionary.yaml in active config; upload one to R2 and re-run /setup"}
+			return nil, &httpError{status: 503, msg: "no ai_dictionary.yaml in R2"}
 		}
 		return nil, err
 	}

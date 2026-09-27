@@ -51,6 +51,9 @@ go build ./...
 go test ./...   # tests live in tests/ and need no sandbox
 ```
 
+To run the whole server locally (Docker, fake R2) and its end-to-end suite, see
+[tests/e2e](tests/e2e/README.md).
+
 ## Usage
 
 ### As a Go Module
@@ -99,6 +102,7 @@ autOScan-engine/
 ├── internal/engine/       # Engine internals (compile/run/sandbox)
 ├── internal/terminal/     # Interactive terminal sessions (pane-host, tokens)
 └── tests/                 # Black-box tests over the exported surfaces
+    └── e2e/               # Local Docker stack + end-to-end server tests (build tag e2e)
 ```
 
 ---

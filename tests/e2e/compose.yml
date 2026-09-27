@@ -1,0 +1,26 @@
+# Local engine stack: the real engine image plus SeaweedFS standing in for R2.
+# docker compose -f tests/e2e/compose.yml up -d --build
+services:
+  s3:
+    image: chrislusf/seaweedfs
+    command: server -s3 -s3.config=/etc/s3.json -dir=/data
+    ports:
+      - "19000:8333"
+    volumes:
+      - ./s3.json:/etc/s3.json:ro
+
+  engine:
+    build: ../..
+    # bubblewrap needs to create namespaces, as it can on Fly's VMs.
+    privileged: true
+    ports:
+      - "18080:8080"
+    environment:
+      ENGINE_SECRET: local-test-secret
+      R2_ACCOUNT_ID: local
+      R2_ACCESS_KEY_ID: local-access-key
+      R2_SECRET_ACCESS_KEY: local-secret-key
+      R2_BUCKET_NAME: autoscan-local
+      R2_ENDPOINT: http://s3:8333
+    depends_on:
+      - s3
