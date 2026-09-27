@@ -22,6 +22,8 @@ type config struct {
 	r2AccessKey  string
 	r2SecretKey  string
 	r2BucketName string
+	// Overrides the R2 endpoint, e.g. http://minio:9000 for a local S3-compatible store.
+	r2Endpoint string
 }
 
 func loadConfig() config {
@@ -46,6 +48,7 @@ func loadConfig() config {
 		r2AccessKey:  os.Getenv("R2_ACCESS_KEY_ID"),
 		r2SecretKey:  os.Getenv("R2_SECRET_ACCESS_KEY"),
 		r2BucketName: os.Getenv("R2_BUCKET_NAME"),
+		r2Endpoint:   strings.TrimSpace(os.Getenv("R2_ENDPOINT")),
 	}
 }
 

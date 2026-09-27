@@ -26,6 +26,9 @@ R2_BUCKET_NAME=your-bucket-name
 ENGINE_SECRET=your-shared-secret
 ```
 
+`R2_ENDPOINT` (optional) points the engine at another S3-compatible store, e.g.
+`http://localhost:9000` for local testing.
+
 ## 3. Deploy
 
 ```bash

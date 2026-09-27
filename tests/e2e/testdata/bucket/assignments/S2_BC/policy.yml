@@ -1,0 +1,13 @@
+name: S2 BC
+compile:
+  gcc: gcc
+  flags: ["-Wall"]
+  source_file: S2.c
+library_files: ["bc_lib.c", "bc_lib.h"]
+test_files: ["bc_input.txt"]
+run:
+  test_cases:
+    - name: prints input
+      args: ["bc_input.txt"]
+      input: ""
+      expected_output_file: t1.txt
