@@ -20,7 +20,7 @@
 
 ## Cloud Service
 
-This repo also ships the cloud grading service used by the Web Agent. For
+This repo also ships the cloud grading service used by the autOScan web app. For
 service setup, deployment, environment variables, and HTTP API details, see
 [CLOUD_SETUP.md](./CLOUD_SETUP.md).
 
