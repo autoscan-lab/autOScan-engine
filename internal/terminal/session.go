@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxSessions  = 5
+	maxSessions  = 16
 	idleTimeout  = 10 * time.Minute
 	maxLifetime  = 45 * time.Minute
 	linger       = 60 * time.Second

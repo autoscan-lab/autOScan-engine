@@ -32,14 +32,13 @@ primary_region = 'ams'
 
   # Long-lived terminal WebSockets each occupy a slot, so the ceiling leaves
   # room for grading requests alongside open terminals (engine caps terminal
-  # sessions at 5 itself).
+  # sessions at 16 of up to 4 panes each).
   [http_service.concurrency]
     type = 'requests'
-    hard_limit = 25
-    soft_limit = 20
+    hard_limit = 80
+    soft_limit = 70
 
+# Performance CPUs are never throttled; shared ones ran out of burst credit mid-grade.
 [[vm]]
+  size = 'performance-1x'
   memory = '2gb'
-  cpu_kind = 'shared'
-  cpus = 2
-  memory_mb = 2048
