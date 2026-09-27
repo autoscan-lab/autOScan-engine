@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,7 +13,6 @@ const (
 
 type config struct {
 	dataDir      string
-	currentDir   string
 	port         string
 	engineSecret string
 	// Zero disables idle exit (local runs).
@@ -41,7 +39,6 @@ func loadConfig() config {
 
 	return config{
 		dataDir:      dataDir,
-		currentDir:   filepath.Join(dataDir, "current"),
 		port:         port,
 		engineSecret: os.Getenv("ENGINE_SECRET"),
 		idleExit:     idleExit,

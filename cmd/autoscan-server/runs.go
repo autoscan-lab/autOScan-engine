@@ -18,6 +18,7 @@ const (
 	runsDirName     = "runs"
 	runStateFile    = "run.json"
 	runWorkspaceDir = "workspace"
+	runConfigDir    = "config"
 )
 
 type runState struct {
@@ -41,6 +42,15 @@ func runWorkspacePath(cfg config, runID string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(base, runWorkspaceDir), nil
+}
+
+// The run's own copy of its assignment config (policy, libraries, test files), as graded.
+func runConfigPath(cfg config, runID string) (string, error) {
+	base, err := runBasePath(cfg, runID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, runConfigDir), nil
 }
 
 func runUploadPath(cfg config, runID string, extension string) (string, error) {

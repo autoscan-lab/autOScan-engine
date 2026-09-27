@@ -44,11 +44,15 @@ func main() {
 	}
 	pruneOldRuns(cfg)
 
-	srv := &server{cfg: cfg, progress: newProgressTracker(), activity: newActivity()}
+	srv := &server{
+		cfg:       cfg,
+		progress:  newProgressTracker(),
+		activity:  newActivity(),
+		gradeSlot: make(chan struct{}, 1),
+	}
 
-	limiter := newRateLimiter(defaultRateLimitPerSecond, defaultRateLimitBurst)
 	protected := func(h http.HandlerFunc) http.Handler {
-		return limitRequests(limiter, withSecret(cfg.engineSecret, h))
+		return withSecret(cfg.engineSecret, h)
 	}
 
 	mux := http.NewServeMux()
@@ -58,7 +62,7 @@ func main() {
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
 	mux.Handle("GET /progress/{token}", protected(srv.progressStatus))
 	// Token-authenticated instead of withSecret: the browser connects directly and cannot carry the engine secret.
-	mux.Handle("GET /terminal", limitRequests(limiter, http.HandlerFunc(srv.terminal)))
+	mux.HandleFunc("GET /terminal", srv.terminal)
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.port,
@@ -91,10 +95,10 @@ func main() {
 
 type server struct {
 	cfg config
-	// mu serializes a grade job's assignment setup against in-flight readers so the active config is never swapped mid-read.
-	mu       sync.RWMutex
-	progress *progressTracker
-	activity *activity
+	// Grade jobs run one at a time: compile and test timeouts are wall-clock, so jobs sharing the CPU would time out students' programs.
+	gradeSlot chan struct{}
+	progress  *progressTracker
+	activity  *activity
 	// run id -> context.CancelFunc for in-flight async grade jobs.
 	jobs sync.Map
 }
