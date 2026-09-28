@@ -22,7 +22,7 @@ type config struct {
 	r2AccessKey  string
 	r2SecretKey  string
 	r2BucketName string
-	// Overrides the R2 endpoint, e.g. http://minio:9000 for a local S3-compatible store.
+	// Overrides the R2 endpoint, e.g. http://s3:8333 for the local SeaweedFS store.
 	r2Endpoint string
 }
 

@@ -27,7 +27,7 @@ service setup, deployment, environment variables, and HTTP API details, see
 ## Features
 
 - Submission discovery from root folders
-- Parallel compilation pipeline with worker controls
+- Parallel compilation pipeline
 - Single-process execution with args/stdin/test-case support
 - Multi-process execution: spawns every configured executable concurrently and returns one buffered result per scenario
 - Always-on Valgrind validation for leaks, reachable memory, memory errors, and open file descriptors
@@ -72,7 +72,7 @@ import (
 )
 
 p, _ := policy.Load("/path/to/policy.yaml")
-runner, _ := engine.NewRunner(p, engine.WithWorkers(4))
+runner, _ := engine.NewRunner(p)
 report, _ := runner.Run(context.Background(), "/path/to/submissions", engine.RunnerCallbacks{})
 _ = report
 ```
@@ -82,7 +82,7 @@ _ = report
 For policies with `run.multi_process.enabled: true`, use the executor directly:
 
 ```go
-executor := engine.NewExecutorWithOptions(p, binaryDir, false)
+executor := engine.NewExecutor(p, binaryDir)
 result := executor.ExecuteMultiProcess(ctx, submission)
 // or, with a scenario override:
 result = executor.ExecuteMultiProcessScenario(ctx, submission, scenario)
@@ -102,6 +102,7 @@ autOScan-engine/
 ├── pkg/ai/                # AI dictionary parsing/validation
 ├── internal/engine/       # Engine internals (compile/run/sandbox)
 ├── internal/terminal/     # Interactive terminal sessions (pane-host, tokens)
+├── cmd/autoscan-server/   # Cloud grading service (HTTP, R2, grade queue)
 └── tests/                 # Black-box tests over the exported surfaces
     └── e2e/               # Local Docker stack + end-to-end server tests (build tag e2e)
 ```
