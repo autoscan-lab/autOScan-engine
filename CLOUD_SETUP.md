@@ -12,6 +12,7 @@ your-bucket-name/
       expected_outputs/   # optional: test-case + scenario expected outputs
       libraries/          # optional: companion .c/.o/.h files
       test_files/         # optional: data files passed as args
+      solution/           # optional: reference solution for solution terminals
     .../
       policy.yml
 ```
@@ -57,7 +58,10 @@ starts it again on the next request. Leave the variable unset locally to never e
 - `POST /sandbox/analyze` - ad-hoc similarity + AI detection on a zip, no run state
 - `GET  /terminal` - WebSocket, one connection per shell pane; auth is a
   short-lived HMAC token minted by the web app (not the secret header). Panes
-  of one token share a sandboxed session.
+  of one token share a sandboxed session. A token names either a graded
+  submission (`run_id`, `submission_id`) or, with `solution: true`, an
+  assignment whose `solution/` files are copied in with its libraries and test
+  files.
 
 Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
 the volume and keeps it with the run's workspace, so a run's terminal always gets

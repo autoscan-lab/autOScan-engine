@@ -112,3 +112,21 @@ func TestParseTokenKeepsAssignment(t *testing.T) {
 		t.Fatalf("assignment = %q, want S2_BC", got.Assignment)
 	}
 }
+
+func TestParseTokenSolutionNeedsOnlyAssignment(t *testing.T) {
+	secret := "test-secret"
+	claims := terminal.Claims{Assignment: "S2_BC", Solution: true, Exp: time.Now().Unix() + 60}
+
+	got, err := terminal.ParseToken(secret, mintToken(t, secret, claims))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !got.Solution || got.Assignment != "S2_BC" {
+		t.Fatalf("claims = %+v, want a solution session for S2_BC", got)
+	}
+
+	claims.Assignment = ""
+	if _, err := terminal.ParseToken(secret, mintToken(t, secret, claims)); err == nil {
+		t.Fatal("a solution token without an assignment should be rejected")
+	}
+}

@@ -98,6 +98,30 @@ func TestTerminalGetsTheRunsOwnPolicyFiles(t *testing.T) {
 	}
 }
 
+func TestSolutionTerminalBuildsFromThePolicy(t *testing.T) {
+	out, _ := terminalRun(t, mintSolutionToken("S2_BC"), "ls -1 && gcc -Wall S2.c bc_lib.c -o S2 && ./S2 bc_input.txt")
+	for _, want := range []string{"S2.c", "bc_lib.c", "bc_input.txt", "hello from BC"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("solution terminal output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSolutionTerminalWithoutSolutionCloses(t *testing.T) {
+	_, frames := dialTerminal(t, mintSolutionToken("S2_AICE"))
+	timeout := time.After(15 * time.Second)
+	for {
+		select {
+		case _, ok := <-frames:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("terminal for an assignment without solution files stayed open")
+		}
+	}
+}
+
 func TestGradesQueueWithoutBlockingTerminals(t *testing.T) {
 	bc := gradeDone(t, "S2_BC", "fast")
 	slow := startGrade(t, "S2_BC", "slow")
@@ -306,6 +330,21 @@ func mintToken(run, submission, assignment string) string {
 		"session_id":    fmt.Sprintf("e2e-%d", time.Now().UnixNano()),
 		"panes":         1,
 		"exp":           time.Now().Add(time.Minute).Unix(),
+	})
+	payload := base64.RawURLEncoding.EncodeToString(claims)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func mintSolutionToken(assignment string) string {
+	claims, _ := json.Marshal(map[string]any{
+		"assignment": assignment,
+		"solution":   true,
+		"student":    "solution",
+		"session_id": fmt.Sprintf("e2e-%d", time.Now().UnixNano()),
+		"panes":      1,
+		"exp":        time.Now().Add(time.Minute).Unix(),
 	})
 	payload := base64.RawURLEncoding.EncodeToString(claims)
 	mac := hmac.New(sha256.New, []byte(secret))

@@ -32,8 +32,9 @@ service setup, deployment, environment variables, and HTTP API details, see
 - Multi-process execution: spawns every configured executable concurrently and returns one buffered result per scenario
 - Always-on Valgrind validation for leaks, reachable memory, memory errors, and open file descriptors
 - Sandboxed environment for grading untrusted submissions
-- Interactive terminal sessions: up to 4 shell panes per submission sharing
-  one sandbox, so processes from different panes can IPC
+- Interactive terminal sessions: up to 4 shell panes per submission (or per
+  assignment's reference solution) sharing one sandbox, so processes from
+  different panes can IPC
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via C token fingerprinting
 - AI-pattern detection against dictionary fingerprints
