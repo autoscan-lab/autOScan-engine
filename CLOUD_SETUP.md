@@ -28,7 +28,8 @@ ENGINE_SECRET=your-shared-secret
 ```
 
 `R2_ENDPOINT` (optional) points the engine at another S3-compatible store, e.g.
-`http://localhost:9000` for local testing.
+the SeaweedFS store in the local stack ([tests/e2e](tests/e2e/README.md)).
+`PORT` (default `8080`) and `AUTOSCAN_DATA_DIR` (default `/data`) are optional too.
 
 ## 3. Deploy
 
