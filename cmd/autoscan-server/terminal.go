@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -107,17 +108,44 @@ func (s *server) runConfig(ctx context.Context, claims terminal.Claims) (string,
 	return configDir, nil
 }
 
-func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
-	claims, err := terminal.ParseToken(s.cfg.engineSecret, r.URL.Query().Get("token"))
+// A solution session's workspace: the assignment's solution files plus its libraries and test files.
+func (s *server) buildSolutionScratch(ctx context.Context, assignment string) (string, error) {
+	tmp, err := os.MkdirTemp("", "autoscan-solution-*")
 	if err != nil {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+
+	r2, err := newR2Client(ctx, s.cfg)
+	if err != nil {
+		return "", err
+	}
+	configDir := filepath.Join(tmp, "config")
+	if err := fetchAssignmentConfig(ctx, r2, assignment, configDir); err != nil {
+		return "", err
+	}
+	if entries, err := os.ReadDir(filepath.Join(configDir, "solution")); err != nil || len(entries) == 0 {
+		return "", fmt.Errorf("assignment %q has no solution files", assignment)
 	}
 
+	scratch, err := os.MkdirTemp("", "autoscan-term-*")
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range []string{"solution", "libraries", "test_files"} {
+		if err := copyFilesNoClobber(filepath.Join(configDir, dir), scratch); err != nil {
+			_ = os.RemoveAll(scratch)
+			return "", err
+		}
+	}
+	return scratch, nil
+}
+
+// Resolves a graded submission's workspace, failing with an HTTP error before the socket is upgraded.
+func (s *server) submissionScratch(ctx context.Context, claims terminal.Claims) (func() (string, error), error) {
 	state, err := loadRunState(s.cfg, claims.RunID)
 	if err != nil {
-		writeError(w, err)
-		return
+		return nil, err
 	}
 	var sub *domain.Submission
 	for index := range state.Submissions {
@@ -127,24 +155,46 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if sub == nil {
-		writeError(w, &httpError{status: 404, msg: "submission not found in run"})
-		return
+		return nil, &httpError{status: 404, msg: "submission not found in run"}
 	}
 	workspaceDir, err := runWorkspacePath(s.cfg, claims.RunID)
 	if err != nil {
-		writeError(w, err)
-		return
+		return nil, err
 	}
 	if rel, err := filepath.Rel(workspaceDir, sub.Path); err != nil || strings.HasPrefix(rel, "..") {
-		writeError(w, &httpError{status: 404, msg: "submission workspace not available"})
-		return
+		return nil, &httpError{status: 404, msg: "submission workspace not available"}
 	}
 	if _, err := os.Stat(sub.Path); err != nil {
-		writeError(w, &httpError{status: 410, msg: "submission workspace expired; re-run grading"})
+		return nil, &httpError{status: 410, msg: "submission workspace expired; re-run grading"}
+	}
+	configDir, err := s.runConfig(ctx, claims)
+	if err != nil {
+		return nil, err
+	}
+	return func() (string, error) {
+		return buildTerminalScratch(configDir, *sub)
+	}, nil
+}
+
+func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
+	claims, err := terminal.ParseToken(s.cfg.engineSecret, r.URL.Query().Get("token"))
+	if err != nil {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
-	configDir, err := s.runConfig(r.Context(), claims)
-	if err != nil {
+
+	var buildScratch func() (string, error)
+	target := fmt.Sprintf("run_id=%s submission=%s", claims.RunID, claims.SubmissionID)
+	if claims.Solution {
+		if !validAssignmentName(claims.Assignment) {
+			writeError(w, &httpError{status: 400, msg: "invalid assignment name"})
+			return
+		}
+		buildScratch = func() (string, error) {
+			return s.buildSolutionScratch(r.Context(), claims.Assignment)
+		}
+		target = fmt.Sprintf("assignment=%s solution", claims.Assignment)
+	} else if buildScratch, err = s.submissionScratch(r.Context(), claims); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -155,9 +205,7 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ts, err := terminal.Join(claims, func() (string, error) {
-		return buildTerminalScratch(configDir, *sub)
-	})
+	ts, err := terminal.Join(claims, buildScratch)
 	if err != nil {
 		code := websocket.StatusInternalError
 		if errors.Is(err, terminal.ErrSessionLimit) || errors.Is(err, terminal.ErrPaneLimit) || errors.Is(err, terminal.ErrSessionClosed) {
@@ -167,7 +215,7 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("terminal: pane start run_id=%s submission=%s session=%s", claims.RunID, claims.SubmissionID, ts.ID())
+	log.Printf("terminal: pane start %s session=%s", target, ts.ID())
 	terminal.ServePane(conn, ts)
-	log.Printf("terminal: pane end run_id=%s submission=%s session=%s", claims.RunID, claims.SubmissionID, ts.ID())
+	log.Printf("terminal: pane end %s session=%s", target, ts.ID())
 }

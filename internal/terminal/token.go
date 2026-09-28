@@ -22,10 +22,12 @@ type Claims struct {
 	RunID        string `json:"run_id"`
 	SubmissionID string `json:"submission_id"`
 	Assignment   string `json:"assignment,omitempty"`
-	Student      string `json:"student,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	Panes        int    `json:"panes,omitempty"`
-	Exp          int64  `json:"exp"`
+	// A solution session runs the assignment's solution files instead of a graded submission.
+	Solution  bool   `json:"solution,omitempty"`
+	Student   string `json:"student,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Panes     int    `json:"panes,omitempty"`
+	Exp       int64  `json:"exp"`
 }
 
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -52,7 +54,11 @@ func ParseToken(secret, token string) (Claims, error) {
 	if err := json.Unmarshal(body, &claims); err != nil {
 		return Claims{}, errors.New("malformed token claims")
 	}
-	if claims.RunID == "" || claims.SubmissionID == "" {
+	if claims.Solution {
+		if claims.Assignment == "" {
+			return Claims{}, errors.New("incomplete token claims")
+		}
+	} else if claims.RunID == "" || claims.SubmissionID == "" {
 		return Claims{}, errors.New("incomplete token claims")
 	}
 	if time.Now().Unix() > claims.Exp {

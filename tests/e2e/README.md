@@ -23,6 +23,8 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
 |---|---|
 | `TestGradeProducesPassingResults` | a grade job downloads the policy and submissions and writes a passing `result.json` |
 | `TestTerminalGetsTheRunsOwnPolicyFiles` | a terminal gets the libraries and test files of its own run, not of the last graded assignment |
+| `TestSolutionTerminalBuildsFromThePolicy` | a solution terminal gets the assignment's solution, libraries, and test files, and the solution compiles and runs |
+| `TestSolutionTerminalWithoutSolutionCloses` | a solution terminal for an assignment with no solution files closes instead of opening an empty shell |
 | `TestGradesQueueWithoutBlockingTerminals` | a second grade waits as `Queued` while terminals still open instantly |
 | `TestCancelQueuedGrade` | `DELETE /grade/{id}` cancels a job that is still queued |
 | `TestProgressBurstIsNotRateLimited` | many progress polls at once are never rejected |
@@ -37,7 +39,7 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
   secret `local-secret-key` (see `s3.json`).
 - `testdata/bucket` is copied to the bucket root: `banned.yaml` and two
   assignments, `S2_BC` and `S2_AICE`, whose library and test file names differ
-  so a terminal shows which policy it got.
+  so a terminal shows which policy it got. Only `S2_BC` has a `solution/`.
 - `testdata/submissions/<name>` is zipped to `web/uploads/staging/<name>.zip`:
   `fast` passes its test, `slow` sleeps so a grade stays busy for a few seconds.
 
