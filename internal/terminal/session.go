@@ -31,6 +31,11 @@ var (
 	ErrSessionClosed = errors.New("terminal session ended")
 )
 
+// ShownError is a workspace failure worth showing the user; others close as a generic error.
+type ShownError struct{ Msg string }
+
+func (e *ShownError) Error() string { return e.Msg }
+
 type Session struct {
 	id string
 
@@ -120,7 +125,11 @@ func (ts *Session) create(student string, buildScratch func() (string, error)) {
 	scratch, err := buildScratch()
 	if err != nil {
 		log.Printf("terminal: scratch setup failed session=%s: %v", ts.id, err)
-		ts.fail(errors.New("could not prepare workspace"))
+		var shown *ShownError
+		if !errors.As(err, &shown) {
+			err = errors.New("could not prepare workspace")
+		}
+		ts.fail(err)
 		return
 	}
 	ts.scratch = scratch

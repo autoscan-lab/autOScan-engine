@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -99,11 +100,38 @@ func TestTerminalGetsTheRunsOwnPolicyFiles(t *testing.T) {
 }
 
 func TestSolutionTerminalBuildsFromThePolicy(t *testing.T) {
-	out, _ := terminalRun(t, mintSolutionToken("S2_BC"), "ls -1 && gcc -Wall S2.c bc_lib.c -o S2 && ./S2 bc_input.txt")
+	// No gcc: the engine builds the solution before the shell opens.
+	out, _ := terminalRun(t, mintSolutionToken("S2_BC"), "ls -1 && ./S2 bc_input.txt")
 	for _, want := range []string{"S2.c", "bc_lib.c", "bc_input.txt", "hello from BC"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("solution terminal output is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestSolutionTerminalThatFailsToCompileSaysWhy(t *testing.T) {
+	ctx := context.Background()
+	key := "assignments/S2_AICE/solution/S2.c"
+	broken := "int main(void) { return missing; }\n"
+	if _, err := store.PutObject(ctx, bucket, key, strings.NewReader(broken), int64(len(broken)), minio.PutObjectOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	defer store.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
+
+	wsURL := strings.Replace(engineURL, "http", "ws", 1) + "/terminal?token=" + mintSolutionToken("S2_AICE")
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial terminal: %v", err)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	for err == nil {
+		_, _, err = conn.Read(readCtx)
+	}
+
+	var closed websocket.CloseError
+	if !errors.As(err, &closed) || !strings.Contains(closed.Reason, "solution does not compile") || !strings.Contains(closed.Reason, "missing") {
+		t.Fatalf("want a close reason naming the compile error, got %v", err)
 	}
 }
 

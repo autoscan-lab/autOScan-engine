@@ -16,6 +16,7 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/internal/engine"
 	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
+	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 func copyTree(src, dst string) error {
@@ -135,7 +136,49 @@ func (s *server) buildSolutionScratch(ctx context.Context, assignment string) (s
 			return "", err
 		}
 	}
+	if err := compileSolution(ctx, configDir, scratch); err != nil {
+		_ = os.RemoveAll(scratch)
+		return "", err
+	}
 	return scratch, nil
+}
+
+// Builds the solution the way grading builds a submission, so its shell opens ready to run.
+func compileSolution(ctx context.Context, configDir, scratch string) error {
+	p, err := policy.LoadWithGlobalsFromConfigDir(filepath.Join(configDir, policyFileName), configDir)
+	if err != nil {
+		return fmt.Errorf("loading policy: %w", err)
+	}
+	binDir, err := os.MkdirTemp("", "autoscan-solution-bin-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(binDir)
+
+	compiler, err := engine.NewCompileEngine(p, engine.WithWorkers(1), engine.WithOutputDir(binDir))
+	if err != nil {
+		return err
+	}
+	defer compiler.Cleanup()
+
+	sub := domain.NewSubmission("solution", scratch, nil)
+	if result := compiler.CompileAll(ctx, []domain.Submission{sub}, nil)[0]; !result.OK {
+		log.Printf("terminal: solution compile failed: %s", result.Stderr)
+		stderr := strings.ReplaceAll(result.Stderr, scratch+string(filepath.Separator), "")
+		return &terminal.ShownError{Msg: "solution does not compile: " + firstErrorLine(stderr)}
+	}
+	return copyFilesNoClobber(filepath.Join(binDir, sub.ID), scratch)
+}
+
+// gcc leads with context lines, so the first line naming an error is the useful one.
+func firstErrorLine(stderr string) string {
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "error") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return strings.TrimSpace(lines[0])
 }
 
 // Resolves a graded submission's workspace, failing with an HTTP error before the socket is upgraded.
@@ -208,11 +251,20 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, terminal.ErrSessionLimit) || errors.Is(err, terminal.ErrPaneLimit) || errors.Is(err, terminal.ErrSessionClosed) {
 			code = websocket.StatusTryAgainLater
 		}
-		_ = conn.Close(code, err.Error())
+		_ = conn.Close(code, closeReason(err))
 		return
 	}
 
 	log.Printf("terminal: pane start %s session=%s", target, ts.ID())
 	terminal.ServePane(conn, ts)
 	log.Printf("terminal: pane end %s session=%s", target, ts.ID())
+}
+
+// Close frames drop reasons over 123 bytes, which would hide why the terminal closed.
+func closeReason(err error) string {
+	reason := err.Error()
+	if len(reason) > 123 {
+		reason = strings.ToValidUTF8(reason[:120], "") + "..."
+	}
+	return reason
 }
