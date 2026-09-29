@@ -6,9 +6,9 @@ this file, so edit this one.
 ## Overview
 
 autOScan-engine is the Go module `github.com/autoscan-lab/autoscan-engine`. It
-contains the grading engine and the HTTP service in `cmd/autoscan-server`, which
-the autOScan web app calls. The service runs on Fly.io as one machine with a
-`/data` volume (see `fly.toml`).
+contains the grading engine and the HTTP grading service in
+`cmd/autoscan-server`. The service runs on Fly.io as one machine with a `/data`
+volume (see `fly.toml`).
 
 - **What it owns:** compilation, test execution under Valgrind,
   banned-function scanning, similarity, AI detection, multi-process runs,
@@ -55,20 +55,14 @@ docker compose -f tests/e2e/compose.yml down
   Docker build.
 - `tests/e2e/README.md` lists the scenarios and how to add one.
 
-## Contract with the web app
+## HTTP contract
 
-- The autOScan web app is usually checked out next to this repo as
-  `../autoscan-app`.
-- JSON is snake_case, and this repo defines the canonical shape. When a field
-  changes, update:
-  - the app's `src/lib/engine/client.ts` and `src/lib/grading/results.ts`;
-  - the endpoint list in `CLOUD_SETUP.md`;
-  - the engine contract in the app's `ARCHITECTURE.md`.
-- Terminal tokens are signed by the app with `ENGINE_SECRET`. Their claims in
-  `internal/terminal/token.go` must match what the app's
-  `src/app/api/terminal/route.ts` mints.
-- Deploy first the side that tolerates the other's old version, which is
-  usually the engine (`fly deploy`).
+- JSON is snake_case, and this repo defines the canonical shape. When an
+  endpoint or field changes, update the endpoint list in `CLOUD_SETUP.md`.
+- Terminal tokens are HMAC-signed with `ENGINE_SECRET` by the caller. Their
+  claims are defined in `internal/terminal/token.go`.
+- Contract changes should accept what callers already send, so the engine can
+  deploy (`fly deploy`) before its callers update.
 
 ## Conventions
 
