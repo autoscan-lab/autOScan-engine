@@ -63,7 +63,8 @@ starts it again on the next request. Leave the variable unset locally to never e
   of one token share a sandboxed session. A token names either a graded
   submission (`run_id`, `submission_id`) or, with `solution: true`, an
   assignment whose `solution/` files are copied in with its libraries and test
-  files.
+  files and compiled before the shell opens. A solution that doesn't compile
+  closes the socket with the compile error as the reason.
 
 Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
 the volume and keeps it with the run's workspace, so a run's terminal always gets

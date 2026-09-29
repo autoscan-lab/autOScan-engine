@@ -23,7 +23,8 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
 |---|---|
 | `TestGradeProducesPassingResults` | a grade job downloads the policy and submissions and writes a passing `result.json` |
 | `TestTerminalGetsTheRunsOwnPolicyFiles` | a terminal gets the libraries and test files of its own run, not of the last graded assignment |
-| `TestSolutionTerminalBuildsFromThePolicy` | a solution terminal gets the assignment's solution, libraries, and test files, and the solution compiles and runs |
+| `TestSolutionTerminalBuildsFromThePolicy` | a solution terminal gets the assignment's solution, libraries, and test files, with the solution already built and runnable |
+| `TestSolutionTerminalThatFailsToCompileSaysWhy` | a solution that doesn't compile closes the terminal with the compile error as the reason |
 | `TestSolutionTerminalWithoutSolutionCloses` | a solution terminal for an assignment with no solution files closes instead of opening an empty shell |
 | `TestGradesQueueWithoutBlockingTerminals` | a second grade waits as `Queued` while terminals still open instantly |
 | `TestCancelQueuedGrade` | `DELETE /grade/{id}` cancels a job that is still queued |
