@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/engine"
 	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
@@ -57,11 +58,7 @@ func copyFilesNoClobber(src, dst string) error {
 		if _, err := os.Stat(target); err == nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(src, entry.Name()))
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, data, 0o644); err != nil {
+		if err := engine.CopyFile(filepath.Join(src, entry.Name()), target); err != nil {
 			return err
 		}
 	}
