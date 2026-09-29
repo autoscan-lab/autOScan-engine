@@ -11,7 +11,8 @@ your-bucket-name/
       policy.yml
       expected_outputs/   # optional: test-case + scenario expected outputs
       libraries/          # optional: companion .c/.o/.h files
-      test_files/         # optional: data files passed as args
+      test_files/         # optional: data files passed as args; Linux executables
+                          #   here are made runnable when copied
       solution/           # optional: reference solution for solution terminals
     .../
       policy.yml

@@ -1,7 +1,10 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"debug/elf"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -250,5 +253,49 @@ func TestStaleProducedFileDoesNotPass(t *testing.T) {
 	skips := policy.TestCase{Name: "skips", ProducedFile: "out.txt", ExpectedOutputFile: "made.txt"}
 	if got := executor.ExecuteTestCase(context.Background(), sub, skips).OutputMatch; got != domain.OutputMatchMissing {
 		t.Fatalf("expected missing when the program does not write the file, got %q", got)
+	}
+}
+
+func elfHeader(t *testing.T, fileType elf.Type) []byte {
+	t.Helper()
+	hdr := elf.Header64{Type: uint16(fileType), Machine: uint16(elf.EM_X86_64), Version: uint32(elf.EV_CURRENT), Ehsize: 64}
+	copy(hdr.Ident[:], elf.ELFMAG)
+	hdr.Ident[elf.EI_CLASS] = byte(elf.ELFCLASS64)
+	hdr.Ident[elf.EI_DATA] = byte(elf.ELFDATA2LSB)
+	hdr.Ident[elf.EI_VERSION] = byte(elf.EV_CURRENT)
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, hdr); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestCopyFileMakesOnlyProgramsExecutable(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	files := map[string]struct {
+		data       []byte
+		executable bool
+	}{
+		"worm":     {elfHeader(t, elf.ET_DYN), true},
+		"static":   {elfHeader(t, elf.ET_EXEC), true},
+		"lib.o":    {elfHeader(t, elf.ET_REL), false},
+		"data.bin": {[]byte{0x7f, 0x00, 0x01, 0x02}, false},
+		"notes":    {[]byte("#!/bin/sh\necho hi\n"), false},
+	}
+
+	for name, file := range files {
+		if err := os.WriteFile(filepath.Join(src, name), file.data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := engine.CopyFile(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(dst, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode()&0o111 != 0; got != file.executable {
+			t.Errorf("%s: executable=%v, want %v", name, got, file.executable)
+		}
 	}
 }

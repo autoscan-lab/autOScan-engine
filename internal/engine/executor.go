@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"fmt"
 	"io"
 	"os"
@@ -314,7 +315,23 @@ func CopyFile(src, dst string) error {
 		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	// R2 keeps no file modes, so copied programs need their execute bit back.
+	if isProgram(in) {
+		return os.Chmod(dst, 0o755)
+	}
+	return nil
+}
+
+// ELF executables only: data files and .o objects stay non-executable.
+func isProgram(r io.ReaderAt) bool {
+	f, err := elf.NewFile(r)
+	if err != nil {
+		return false
+	}
+	return f.Type == elf.ET_EXEC || f.Type == elf.ET_DYN
 }
 
 func (e *Executor) ExecuteMultiProcess(ctx context.Context, sub domain.Submission) *domain.MultiProcessResult {
