@@ -15,7 +15,6 @@ type Policy struct {
 	Run             RunConfig     `yaml:"run"`
 	LibraryFiles    []string      `yaml:"library_files"` // .c/.o/.h files from ~/.config/autoscan/libraries/
 	TestFiles       []string      `yaml:"test_files,omitempty"`
-	FilePath        string        `yaml:"-"` // Set after loading
 	ConfigDir       string        `yaml:"-"` // Directory for banned.yaml, libraries, test files, expected outputs
 	BannedFunctions []string      `yaml:"-"` // Loaded from global banned.yaml
 }
@@ -74,7 +73,6 @@ func Load(path string) (*Policy, error) {
 		return nil, fmt.Errorf("parsing policy YAML: %w", err)
 	}
 
-	p.FilePath = path
 	if configDir, err := ConfigDir(); err == nil {
 		p.ConfigDir = configDir
 	}
@@ -82,10 +80,6 @@ func Load(path string) (*Policy, error) {
 		p.Compile.GCC = "gcc"
 	}
 	return &p, nil
-}
-
-func LoadWithGlobals(path string) (*Policy, error) {
-	return LoadWithGlobalsFromConfigDir(path, "")
 }
 
 func LoadWithGlobalsFromConfigDir(path, configDir string) (*Policy, error) {
@@ -126,54 +120,6 @@ func (p *Policy) EffectiveConfigDir() string {
 		return filepath.Join(".", ".autoscan")
 	}
 	return configDir
-}
-
-// BannedFilePath returns ~/.config/autoscan/banned.yaml.
-func BannedFilePath() (string, error) {
-	dir, err := ConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "banned.yaml"), nil
-}
-
-// Discover finds all .yaml/.yml policy files in dir and attaches global banned functions.
-func Discover(dir string) ([]*Policy, error) {
-	var policies []*Policy
-
-	bannedFile, _ := BannedFilePath()
-	bannedFuncs, _ := LoadGlobalBanned(bannedFile)
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading policies directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
-			continue
-		}
-
-		path := filepath.Join(dir, name)
-		p, err := Load(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", name, err)
-			continue
-		}
-
-		p.BannedFunctions = bannedFuncs
-		policies = append(policies, p)
-	}
-
-	return policies, nil
 }
 
 func (p *Policy) BannedSet() map[string]struct{} {

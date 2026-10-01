@@ -123,36 +123,3 @@ func loadAIDictionary(configDir string) (*aipkg.Dictionary, error) {
 	}
 	return dict, nil
 }
-
-func countSimilarityPairs(report *domain.SimilarityReport) int {
-	if report == nil {
-		return 0
-	}
-	return len(report.Pairs)
-}
-
-func countFlaggedSimilarityPairs(report *domain.SimilarityReport) int {
-	if report == nil {
-		return 0
-	}
-	flagged := 0
-	for _, pair := range report.Pairs {
-		if pair.Flagged {
-			flagged++
-		}
-	}
-	return flagged
-}
-
-func countFlaggedAISubmissions(report *domain.AIDetectionReport) int {
-	if report == nil {
-		return 0
-	}
-	flagged := 0
-	for _, submission := range report.Submissions {
-		if submission.Flagged {
-			flagged++
-		}
-	}
-	return flagged
-}

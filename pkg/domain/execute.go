@@ -30,8 +30,6 @@ type ExecuteResult struct {
 	Duration     time.Duration
 	TimedOut     bool
 	CrashReason  string
-	Args         []string
-	Input        string
 	TestCaseName string
 	Passed       bool
 	OutputMatch  OutputMatchStatus
@@ -42,7 +40,6 @@ type ExecuteResult struct {
 }
 
 type TestSummary struct {
-	SubmissionID          string           `json:"submission_id,omitempty"`
 	Total                 int              `json:"total"`
 	Passed                int              `json:"passed"`
 	Failed                int              `json:"failed"`
@@ -52,7 +49,6 @@ type TestSummary struct {
 }
 
 type TestCaseResult struct {
-	SubmissionID   string          `json:"submission_id,omitempty"`
 	Index          int             `json:"index"`
 	Name           string          `json:"name"`
 	Status         string          `json:"status"`
@@ -69,11 +65,11 @@ type TestCaseResult struct {
 	Valgrind       *ValgrindResult `json:"valgrind,omitempty"`
 }
 
-func NewExecuteResult(ok bool, stdout, stderr string, duration time.Duration, timedOut bool, args []string, input string) ExecuteResult {
+func NewExecuteResult(ok bool, stdout, stderr string, duration time.Duration, timedOut bool) ExecuteResult {
 	return ExecuteResult{
 		OK: ok, Stdout: stdout, Stderr: stderr, Duration: duration,
-		TimedOut: timedOut, Args: args, Input: input,
-		Passed: ok && !timedOut,
+		TimedOut: timedOut,
+		Passed:   ok && !timedOut,
 	}
 }
 
@@ -102,17 +98,16 @@ func (s *TestSummary) AddCase(result TestCaseResult) {
 	}
 }
 
-func NewCompileFailedTestCaseResult(submissionID string, index int, name string) TestCaseResult {
+func NewCompileFailedTestCaseResult(index int, name string) TestCaseResult {
 	return TestCaseResult{
-		SubmissionID: submissionID,
-		Index:        index,
-		Name:         name,
-		Status:       "compile_failed",
-		Message:      "Compilation failed; test was not executed.",
+		Index:   index,
+		Name:    name,
+		Status:  "compile_failed",
+		Message: "Compilation failed; test was not executed.",
 	}
 }
 
-func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOutput *string) TestCaseResult {
+func (r ExecuteResult) TestCaseResult(index int, expectedOutput *string) TestCaseResult {
 	status := "pass"
 	if r.TimedOut {
 		status = "timeout"
@@ -128,7 +123,6 @@ func (r ExecuteResult) TestCaseResult(submissionID string, index int, expectedOu
 
 	actualOutput := r.Stdout
 	result := TestCaseResult{
-		SubmissionID:   submissionID,
 		Index:          index,
 		Name:           r.TestCaseName,
 		Status:         status,
@@ -183,7 +177,6 @@ type MultiProcessResult struct {
 	Processes     map[string]*ProcessResult `json:"processes"`
 	Order         []string                  `json:"order"`
 	TotalDuration time.Duration             `json:"total_duration_ns"`
-	AllCompleted  bool                      `json:"all_completed"`
 	AllPassed     bool                      `json:"all_passed"`
 	ScenarioName  string                    `json:"scenario_name,omitempty"`
 }

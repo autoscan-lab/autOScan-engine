@@ -173,7 +173,7 @@ func runTestCases(
 
 	if subResult.Compile.TimedOut || !subResult.Compile.OK {
 		for i, tc := range cases {
-			out.Tests.AddCase(domain.NewCompileFailedTestCaseResult("", i, tc.Name))
+			out.Tests.AddCase(domain.NewCompileFailedTestCaseResult(i, tc.Name))
 		}
 		return
 	}
@@ -220,7 +220,7 @@ func buildTestCasePayload(index int, tc policy.TestCase, result domain.ExecuteRe
 	if exp, ok := expected[tc.ExpectedOutputFile]; ok && exp != nil {
 		expectedOutput = exp
 	}
-	return result.TestCaseResult("", index, expectedOutput)
+	return result.TestCaseResult(index, expectedOutput)
 }
 
 func loadExpectedOutputs(loadedPolicy *policy.Policy) map[string]*string {

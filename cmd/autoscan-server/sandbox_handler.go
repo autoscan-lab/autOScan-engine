@@ -22,13 +22,6 @@ const sandboxSourceFile = "__sandbox.c"
 
 var submissionArchiveExts = []string{".tar.gz", ".tgz", ".tar", ".zip"}
 
-type sandboxSummary struct {
-	SubmissionCount    int `json:"submission_count"`
-	PairCount          int `json:"pair_count"`
-	FlaggedPairs       int `json:"flagged_pairs"`
-	FlaggedSubmissions int `json:"flagged_submissions"`
-}
-
 type sandboxFile struct {
 	Path      string `json:"path"`
 	StartLine int    `json:"start_line"`
@@ -45,7 +38,6 @@ type sandboxAnalyzeResponse struct {
 	Similarity  *domain.SimilarityReport  `json:"similarity,omitempty"`
 	AIDetection *domain.AIDetectionReport `json:"ai_detection,omitempty"`
 	Submissions []sandboxSubmissionSource `json:"submissions"`
-	Summary     sandboxSummary            `json:"summary"`
 }
 
 func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -136,12 +128,6 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		Similarity:  &sim,
 		AIDetection: &ai,
 		Submissions: sources,
-		Summary: sandboxSummary{
-			SubmissionCount:    len(submissions),
-			PairCount:          countSimilarityPairs(&sim),
-			FlaggedPairs:       countFlaggedSimilarityPairs(&sim),
-			FlaggedSubmissions: countFlaggedAISubmissions(&ai),
-		},
 	})
 }
 
