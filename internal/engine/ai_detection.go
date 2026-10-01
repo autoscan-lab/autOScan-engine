@@ -48,8 +48,8 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 		bestScore := 0.0
 		flagged := false
 		for _, m := range matches {
-			if m.Jaccard > bestScore {
-				bestScore = m.Jaccard
+			if m.Score > bestScore {
+				bestScore = m.Score
 			}
 			if m.Flagged {
 				flagged = true
@@ -89,13 +89,14 @@ func fingerprintDictionary(dict *aipkg.Dictionary, cfg domain.CompareConfig) ([]
 	slots := make([]entrySlot, len(dict.Entries))
 	parallelForEach(len(dict.Entries), func(i int) {
 		e := dict.Entries[i]
-		fp, err := fingerprintContent([]byte(e.Code), cfg)
+		// Entries are curated snippets, so short helper functions still count.
+		fp, err := fingerprintContent([]byte(e.Code), 0)
 		if err != nil {
 			slots[i] = entrySlot{err: &domain.AIDictionaryEntryError{EntryID: e.ID, Err: err.Error()}}
 			return
 		}
-		if len(fp.WindowHashes) == 0 {
-			slots[i] = entrySlot{err: &domain.AIDictionaryEntryError{EntryID: e.ID, Err: "entry produced no window fingerprints"}}
+		if fp.TokenCount < cfg.MinMatchTokens {
+			slots[i] = entrySlot{err: &domain.AIDictionaryEntryError{EntryID: e.ID, Err: "entry has no function long enough to match"}}
 			return
 		}
 		slots[i] = entrySlot{item: &dictionaryFingerprint{entry: e, fp: fp}}
@@ -119,20 +120,23 @@ func compareSubmissionToDictionary(subFP domain.FileFingerprint, dictFPs []dicti
 	matches := make([]domain.AIDictionaryMatch, 0, len(dictFPs))
 
 	for _, d := range dictFPs {
-		windowMatches := countIntersection(subFP.WindowHashes, d.fp.WindowHashes)
-		windowUnion := unionCount(subFP.WindowHashes, d.fp.WindowHashes)
-		score := jaccard(windowMatches, windowUnion)
-
-		if windowMatches == 0 {
+		tiles := greedyStringTiling(subFP.Tokens, d.fp.Tokens, cfg.MinMatchTokens)
+		if len(tiles) == 0 {
 			continue
 		}
+		// Containment: how much of the entry appears in the submission.
+		score := float64(tiledTokens(tiles)) / float64(d.fp.TokenCount)
 
+		spans := make([]domain.Span, 0, len(tiles))
+		for _, t := range tiles {
+			spans = append(spans, tileSpan(subFP, t.a, t.length))
+		}
 		matches = append(matches, domain.AIDictionaryMatch{
 			EntryID: d.entry.ID,
 			Title:   d.entry.Title,
-			Jaccard: score,
+			Score:   score,
 			Flagged: score >= cfg.ScoreThreshold,
-			Spans:   extractSubmissionMatches(subFP, d.fp),
+			Spans:   convertSpans(subFP, spans),
 		})
 	}
 
@@ -140,34 +144,11 @@ func compareSubmissionToDictionary(subFP domain.FileFingerprint, dictFPs []dicti
 		if matches[i].Flagged != matches[j].Flagged {
 			return matches[i].Flagged
 		}
-		if matches[i].Jaccard != matches[j].Jaccard {
-			return matches[i].Jaccard > matches[j].Jaccard
+		if matches[i].Score != matches[j].Score {
+			return matches[i].Score > matches[j].Score
 		}
 		return matches[i].EntryID < matches[j].EntryID
 	})
 
 	return matches
-}
-
-func extractSubmissionMatches(subFP, dictFP domain.FileFingerprint) []domain.MatchSpan {
-	if len(subFP.WindowHashes) == 0 || len(dictFP.WindowHashes) == 0 {
-		return nil
-	}
-
-	hashes := make([]string, 0, len(subFP.WindowHashes))
-	for h := range subFP.WindowHashes {
-		if _, ok := dictFP.WindowHashes[h]; ok {
-			hashes = append(hashes, h)
-		}
-	}
-	if len(hashes) == 0 {
-		return nil
-	}
-
-	sort.Strings(hashes)
-	var spans []domain.Span
-	for _, h := range hashes {
-		spans = append(spans, subFP.WindowSpans[h]...)
-	}
-	return convertSpans(subFP, mergeSpans(spans))
 }

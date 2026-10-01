@@ -1,28 +1,22 @@
 package domain
 
 type CompareConfig struct {
-	WindowSize     int
+	MinMatchTokens int
 	MinFuncTokens  int
 	ScoreThreshold float64
 }
 
+// Tokens and Spans are index-aligned; a zero token separates functions and never matches.
 type FileFingerprint struct {
-	FunctionHashes  map[string]struct{}
-	WindowHashes    map[string]struct{}
-	WindowSpans     map[string][]Span
-	FunctionCount   int
-	FunctionWindows []map[string]struct{}
-	Content         []byte
-	LineOffsets     []int
+	Tokens        []uint64
+	Spans         []Span
+	TokenCount    int
+	FunctionCount int
+	Content       []byte
+	LineOffsets   []int
 }
 
 type Span struct {
-	Start uint32 // Start byte offset
-	End   uint32 // End byte offset
-}
-
-type TokenSpan struct {
-	Token string
 	Start uint32 // Start byte offset
 	End   uint32 // End byte offset
 }
@@ -35,23 +29,18 @@ type MatchSpan struct {
 	Snippet   string `json:"snippet"`
 }
 
-type WindowMatch struct {
+type TileMatch struct {
 	Hash   string      `json:"hash"`
 	SpansA []MatchSpan `json:"spans_a,omitempty"`
 	SpansB []MatchSpan `json:"spans_b,omitempty"`
 }
 
 type PlagiarismResult struct {
-	FileA             string        `json:"file_a"`
-	FileB             string        `json:"file_b"`
-	FunctionCountA    int           `json:"function_count_a"`
-	FunctionCountB    int           `json:"function_count_b"`
-	ExactMatches      int           `json:"exact_matches"`
-	WindowMatches     int           `json:"window_matches"`
-	WindowUnion       int           `json:"window_union,omitempty"`
-	SimilarityPercent float64       `json:"similarity_percent"`
-	Flagged           bool          `json:"flagged"`
-	Matches           []WindowMatch `json:"matches,omitempty"`
+	FileA             string      `json:"file_a"`
+	FileB             string      `json:"file_b"`
+	SimilarityPercent float64     `json:"similarity_percent"`
+	Flagged           bool        `json:"flagged"`
+	Matches           []TileMatch `json:"matches,omitempty"`
 }
 
 type SimilarityReport struct {
