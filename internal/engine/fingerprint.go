@@ -2,9 +2,8 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 
@@ -19,10 +18,10 @@ func FingerprintFile(path string, cfg domain.CompareConfig) (domain.FileFingerpr
 		return domain.FileFingerprint{}, err
 	}
 
-	return fingerprintContent(content, cfg)
+	return fingerprintContent(content, cfg.MinFuncTokens)
 }
 
-func fingerprintContent(content []byte, cfg domain.CompareConfig) (domain.FileFingerprint, error) {
+func fingerprintContent(content []byte, minFuncTokens int) (domain.FileFingerprint, error) {
 	parser := sitter.NewParser()
 	parser.SetLanguage(c.GetLanguage())
 
@@ -33,38 +32,38 @@ func fingerprintContent(content []byte, cfg domain.CompareConfig) (domain.FileFi
 	defer tree.Close()
 
 	fp := domain.FileFingerprint{
-		FunctionHashes:  make(map[string]struct{}),
-		WindowHashes:    make(map[string]struct{}),
-		WindowSpans:     make(map[string][]domain.Span),
-		FunctionWindows: make([]map[string]struct{}, 0),
-		Content:         content,
-		LineOffsets:     buildLineOffsets(content),
+		Content:     content,
+		LineOffsets: buildLineOffsets(content),
 	}
 
 	var funcs []*sitter.Node
 	collectFunctionDefs(tree.RootNode(), &funcs)
 
 	for _, fn := range funcs {
-		tokenSpans := normalizeFunctionTokens(fn, content)
-		if len(tokenSpans) < cfg.MinFuncTokens {
+		var tokens []token
+		normalizeTokens(fn, content, make(map[string]int), &tokens)
+		if len(tokens) < minFuncTokens {
 			continue
 		}
 
-		tokens := tokensOnly(tokenSpans)
 		fp.FunctionCount++
-		funcHash := hashTokens(tokens)
-		fp.FunctionHashes[funcHash] = struct{}{}
-
-		funcWindows := make(map[string]struct{})
-		for windowHash, spans := range windowHashes(tokenSpans, cfg.WindowSize) {
-			fp.WindowHashes[windowHash] = struct{}{}
-			funcWindows[windowHash] = struct{}{}
-			fp.WindowSpans[windowHash] = append(fp.WindowSpans[windowHash], spans...)
+		fp.TokenCount += len(tokens)
+		if len(fp.Tokens) > 0 {
+			fp.Tokens = append(fp.Tokens, 0)
+			fp.Spans = append(fp.Spans, domain.Span{})
 		}
-		fp.FunctionWindows = append(fp.FunctionWindows, funcWindows)
+		for _, t := range tokens {
+			fp.Tokens = append(fp.Tokens, hashToken(t.text))
+			fp.Spans = append(fp.Spans, domain.Span{Start: t.start, End: t.end})
+		}
 	}
 
 	return fp, nil
+}
+
+type token struct {
+	text       string
+	start, end uint32
 }
 
 func collectFunctionDefs(node *sitter.Node, out *[]*sitter.Node) {
@@ -82,41 +81,36 @@ func collectFunctionDefs(node *sitter.Node, out *[]*sitter.Node) {
 	}
 }
 
-func normalizeFunctionTokens(node *sitter.Node, content []byte) []domain.TokenSpan {
-	idMap := make(map[string]int)
-	counter := 0
-	var tokens []domain.TokenSpan
-	normalizeTokens(node, content, idMap, &counter, &tokens)
-	return tokens
-}
-
-func normalizeTokens(node *sitter.Node, content []byte, idMap map[string]int, counter *int, tokens *[]domain.TokenSpan) {
+func normalizeTokens(node *sitter.Node, content []byte, idMap map[string]int, tokens *[]token) {
 	if node == nil {
 		return
 	}
 
-	if node.Type() == "comment" {
+	text := ""
+	switch node.Type() {
+	case "comment":
 		return
-	}
-
-	if node.ChildCount() == 0 {
-		token := normalizeToken(node, content, idMap, counter)
-		if token != "" {
-			*tokens = append(*tokens, domain.TokenSpan{
-				Token: token,
-				Start: node.StartByte(),
-				End:   node.EndByte(),
-			})
+	// Literals have child nodes in this grammar, so they collapse here before recursing.
+	case "string_literal", "concatenated_string":
+		text = "@STR"
+	case "char_literal":
+		text = "@CHAR"
+	default:
+		if node.ChildCount() > 0 {
+			for i := 0; i < int(node.ChildCount()); i++ {
+				normalizeTokens(node.Child(i), content, idMap, tokens)
+			}
+			return
 		}
-		return
+		text = normalizeToken(node, content, idMap)
 	}
 
-	for i := 0; i < int(node.ChildCount()); i++ {
-		normalizeTokens(node.Child(i), content, idMap, counter, tokens)
+	if text != "" {
+		*tokens = append(*tokens, token{text: text, start: node.StartByte(), end: node.EndByte()})
 	}
 }
 
-func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int, counter *int) string {
+func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int) string {
 	raw := strings.TrimSpace(node.Content(content))
 	if raw == "" {
 		return ""
@@ -128,18 +122,14 @@ func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int, cou
 
 	switch node.Type() {
 	case "identifier", "field_identifier", "type_identifier":
-		if id, ok := idMap[raw]; ok {
-			return fmt.Sprintf("@%d", id)
+		id, ok := idMap[raw]
+		if !ok {
+			id = len(idMap) + 1
+			idMap[raw] = id
 		}
-		*counter++
-		idMap[raw] = *counter
-		return fmt.Sprintf("@%d", *counter)
+		return fmt.Sprintf("@%d", id)
 	case "number_literal":
 		return "@NUM"
-	case "string_literal":
-		return "@STR"
-	case "char_literal":
-		return "@CHAR"
 	default:
 		if token, ok := normalizeOperator(raw); ok {
 			return token
@@ -148,99 +138,95 @@ func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int, cou
 	}
 }
 
-func hashTokens(tokens []string) string {
-	sum := sha256.Sum256([]byte(strings.Join(tokens, " ")))
-	return hex.EncodeToString(sum[:])
+// Never zero, which is reserved for function boundaries.
+func hashToken(text string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(text))
+	return h.Sum64() | 1
 }
 
-func windowHashes(tokens []domain.TokenSpan, window int) map[string][]domain.Span {
-	if window <= 0 || len(tokens) < window {
-		return nil
-	}
-
-	hashes := make(map[string][]domain.Span, len(tokens)-window+1)
-	for i := 0; i+window <= len(tokens); i++ {
-		windowTokens := tokens[i : i+window]
-		hash := hashTokens(tokensOnly(windowTokens))
-		hashes[hash] = append(hashes[hash], domain.Span{
-			Start: windowTokens[0].Start,
-			End:   windowTokens[len(windowTokens)-1].End,
-		})
-	}
-	return hashes
+type tile struct {
+	a, b, length int
 }
 
-func countIntersection(a, b map[string]struct{}) int {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
+// Greedy String Tiling (as in JPlag): repeatedly marks the longest common unmarked
+// runs of at least minMatch tokens, so each token is matched at most once.
+func greedyStringTiling(a, b []uint64, minMatch int) []tile {
+	if minMatch < 1 {
+		minMatch = 1
 	}
-	if len(a) > len(b) {
-		a, b = b, a
-	}
-
-	count := 0
-	for k := range a {
-		if _, ok := b[k]; ok {
-			count++
+	positions := make(map[uint64][]int)
+	for j, t := range b {
+		if t != 0 {
+			positions[t] = append(positions[t], j)
 		}
 	}
-	return count
-}
 
-func unionCount(a, b map[string]struct{}) int {
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-	seen := make(map[string]struct{}, len(a)+len(b))
-	for k := range a {
-		seen[k] = struct{}{}
-	}
-	for k := range b {
-		seen[k] = struct{}{}
-	}
-	return len(seen)
-}
-
-func jaccard(intersection, union int) float64 {
-	if union == 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-func avgBestFunctionSimilarity(a, b []map[string]struct{}) float64 {
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-	avgAB := avgBestMatch(a, b)
-	avgBA := avgBestMatch(b, a)
-	if avgAB == 0 {
-		return avgBA
-	}
-	if avgBA == 0 {
-		return avgAB
-	}
-	return (avgAB + avgBA) / 2
-}
-
-func avgBestMatch(a, b []map[string]struct{}) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, fa := range a {
-		best := 0.0
-		for _, fb := range b {
-			inter := countIntersection(fa, fb)
-			union := unionCount(fa, fb)
-			sim := jaccard(inter, union)
-			if sim > best {
-				best = sim
+	markedA := make([]bool, len(a))
+	markedB := make([]bool, len(b))
+	var tiles []tile
+	for {
+		maxLen := minMatch
+		var found []tile
+		for i := 0; i+maxLen <= len(a); i++ {
+			if markedA[i] || a[i] == 0 {
+				continue
+			}
+			for _, j := range positions[a[i]] {
+				if markedB[j] {
+					continue
+				}
+				k := 0
+				for i+k < len(a) && j+k < len(b) && a[i+k] != 0 && a[i+k] == b[j+k] && !markedA[i+k] && !markedB[j+k] {
+					k++
+				}
+				if k > maxLen {
+					maxLen = k
+					found = found[:0]
+				}
+				if k == maxLen {
+					found = append(found, tile{a: i, b: j, length: k})
+				}
 			}
 		}
-		sum += best
+		if len(found) == 0 {
+			break
+		}
+		for _, f := range found {
+			if isMarked(markedA, f.a, f.length) || isMarked(markedB, f.b, f.length) {
+				continue
+			}
+			for k := 0; k < f.length; k++ {
+				markedA[f.a+k] = true
+				markedB[f.b+k] = true
+			}
+			tiles = append(tiles, f)
+		}
 	}
-	return sum / float64(len(a))
+
+	sort.Slice(tiles, func(i, j int) bool { return tiles[i].a < tiles[j].a })
+	return tiles
+}
+
+func isMarked(marked []bool, start, length int) bool {
+	for k := start; k < start+length; k++ {
+		if marked[k] {
+			return true
+		}
+	}
+	return false
+}
+
+func tiledTokens(tiles []tile) int {
+	total := 0
+	for _, t := range tiles {
+		total += t.length
+	}
+	return total
+}
+
+func tileSpan(fp domain.FileFingerprint, start, length int) domain.Span {
+	return domain.Span{Start: fp.Spans[start].Start, End: fp.Spans[start+length-1].End}
 }
 
 func isPunctuation(raw string) bool {
@@ -271,14 +257,6 @@ func normalizeOperator(raw string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func tokensOnly(tokens []domain.TokenSpan) []string {
-	out := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		out = append(out, t.Token)
-	}
-	return out
 }
 
 func buildLineOffsets(content []byte) []int {
@@ -318,32 +296,6 @@ func extractSnippet(content []byte, start, end, max int) string {
 		return raw
 	}
 	return raw[:max-3] + "..."
-}
-
-func mergeSpans(spans []domain.Span) []domain.Span {
-	if len(spans) <= 1 {
-		return spans
-	}
-
-	cp := make([]domain.Span, len(spans))
-	copy(cp, spans)
-	sort.Slice(cp, func(i, j int) bool { return cp[i].Start < cp[j].Start })
-
-	out := make([]domain.Span, 0, len(cp))
-	cur := cp[0]
-	for i := 1; i < len(cp); i++ {
-		next := cp[i]
-		if next.Start <= cur.End {
-			if next.End > cur.End {
-				cur.End = next.End
-			}
-			continue
-		}
-		out = append(out, cur)
-		cur = next
-	}
-	out = append(out, cur)
-	return out
 }
 
 func convertSpans(fp domain.FileFingerprint, spans []domain.Span) []domain.MatchSpan {

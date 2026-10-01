@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"math"
 	"path/filepath"
 	"sort"
 
@@ -10,61 +9,33 @@ import (
 )
 
 func CompareFiles(fileA, fileB string, fpA, fpB domain.FileFingerprint, cfg domain.CompareConfig) domain.PlagiarismResult {
-	exactMatches := countIntersection(fpA.FunctionHashes, fpB.FunctionHashes)
-	windowMatches := countIntersection(fpA.WindowHashes, fpB.WindowHashes)
-	windowUnion := unionCount(fpA.WindowHashes, fpB.WindowHashes)
-	windowScore := jaccard(windowMatches, windowUnion)
-	perFuncScore := avgBestFunctionSimilarity(fpA.FunctionWindows, fpB.FunctionWindows)
-	combinedScore := combinedSimilarityScore(windowScore, perFuncScore, fpA.FunctionCount, fpB.FunctionCount)
-	similarityPercent := combinedScore * 100
-
-	matches := extractWindowMatches(fpA, fpB)
+	tiles := greedyStringTiling(fpA.Tokens, fpB.Tokens, cfg.MinMatchTokens)
+	matched := tiledTokens(tiles)
+	score := 0.0
+	if total := fpA.TokenCount + fpB.TokenCount; total > 0 {
+		score = 2 * float64(matched) / float64(total)
+	}
 
 	return domain.PlagiarismResult{
 		FileA:             fileA,
 		FileB:             fileB,
-		FunctionCountA:    fpA.FunctionCount,
-		FunctionCountB:    fpB.FunctionCount,
-		ExactMatches:      exactMatches,
-		WindowMatches:     windowMatches,
-		WindowUnion:       windowUnion,
-		SimilarityPercent: similarityPercent,
-		Flagged:           combinedScore >= cfg.ScoreThreshold,
-		Matches:           matches,
+		SimilarityPercent: score * 100,
+		Flagged:           score >= cfg.ScoreThreshold,
+		Matches:           tileMatches(fpA, fpB, tiles),
 	}
 }
 
-func combinedSimilarityScore(windowScore, perFuncScore float64, functionCountA, functionCountB int) float64 {
-	if functionCountA == 0 || functionCountB == 0 {
-		return math.Max(0, math.Min(1, windowScore))
-	}
-
-	score := (0.65 * windowScore) + (0.35 * perFuncScore)
-	return math.Max(0, math.Min(1, score))
-}
-
-func extractWindowMatches(fpA, fpB domain.FileFingerprint) []domain.WindowMatch {
-	matches := make([]string, 0, len(fpA.WindowHashes))
-	for k := range fpA.WindowHashes {
-		if _, ok := fpB.WindowHashes[k]; ok {
-			matches = append(matches, k)
-		}
-	}
-	if len(matches) == 0 {
+func tileMatches(fpA, fpB domain.FileFingerprint, tiles []tile) []domain.TileMatch {
+	if len(tiles) == 0 {
 		return nil
 	}
-	sort.Strings(matches)
 
-	result := make([]domain.WindowMatch, 0, len(matches))
-	for _, hash := range matches {
-		mergedA := mergeSpans(fpA.WindowSpans[hash])
-		mergedB := mergeSpans(fpB.WindowSpans[hash])
-		spansA := convertSpans(fpA, mergedA)
-		spansB := convertSpans(fpB, mergedB)
-		result = append(result, domain.WindowMatch{
-			Hash:   hash[:8],
-			SpansA: spansA,
-			SpansB: spansB,
+	result := make([]domain.TileMatch, 0, len(tiles))
+	for _, t := range tiles {
+		result = append(result, domain.TileMatch{
+			Hash:   fmt.Sprintf("t%d-%d", t.a, t.b),
+			SpansA: convertSpans(fpA, []domain.Span{tileSpan(fpA, t.a, t.length)}),
+			SpansB: convertSpans(fpB, []domain.Span{tileSpan(fpB, t.b, t.length)}),
 		})
 	}
 	return result

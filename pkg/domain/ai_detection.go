@@ -8,7 +8,7 @@ type AIDictionaryEntryError struct {
 type AIDictionaryMatch struct {
 	EntryID string      `json:"entry_id"`
 	Title   string      `json:"title"`
-	Jaccard float64     `json:"jaccard"`
+	Score   float64     `json:"score"`
 	Flagged bool        `json:"flagged"`
 	Spans   []MatchSpan `json:"spans,omitempty"`
 }

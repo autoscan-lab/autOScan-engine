@@ -36,8 +36,8 @@ service setup, deployment, environment variables, and HTTP API details, see
   assignment's reference solution) sharing one sandbox, so processes from
   different panes can IPC
 - Banned function scanning with file/line/column/snippet evidence
-- Similarity analysis via C token fingerprinting
-- AI-pattern detection against dictionary fingerprints
+- Similarity analysis via Greedy String Tiling over normalized C tokens
+- AI-pattern detection: how much of each dictionary entry appears in a submission
 - Policy parsing and validation helpers
 - Public Go facade package (`pkg/engine`) for autOScan apps/tools
 
