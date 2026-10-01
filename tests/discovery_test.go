@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/autoscan-lab/autoscan-engine/internal/engine"
-	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 func TestDiscoverSkipsMacOSMetadata(t *testing.T) {
@@ -26,7 +25,7 @@ func TestDiscoverSkipsMacOSMetadata(t *testing.T) {
 		}
 	}
 
-	subs, err := engine.NewDiscoveryEngine(&policy.Policy{}).Discover(root)
+	subs, err := engine.NewDiscoveryEngine().Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}

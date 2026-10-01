@@ -18,8 +18,6 @@ type Runner struct {
 type RunnerCallbacks struct {
 	OnDiscoveryComplete func(submissions []domain.Submission)
 	OnCompileComplete   func(sub domain.Submission, result domain.CompileResult)
-	OnScanComplete      func(sub domain.Submission, result domain.ScanResult)
-	OnAllComplete       func(report domain.RunReport)
 }
 
 func NewRunner(p *policy.Policy, opts ...CompileOption) (*Runner, error) {
@@ -30,7 +28,7 @@ func NewRunner(p *policy.Policy, opts ...CompileOption) (*Runner, error) {
 
 	return &Runner{
 		policy:    p,
-		discovery: NewDiscoveryEngine(p),
+		discovery: NewDiscoveryEngine(),
 		compiler:  compiler,
 		scanner:   NewScanEngine(p),
 	}, nil
@@ -58,11 +56,7 @@ func (r *Runner) Run(ctx context.Context, root string, callbacks RunnerCallbacks
 		}
 	})
 
-	scanResults := r.scanner.ScanAll(submissions, func(sub domain.Submission, result domain.ScanResult) {
-		if callbacks.OnScanComplete != nil {
-			callbacks.OnScanComplete(sub, result)
-		}
-	})
+	scanResults := r.scanner.ScanAll(submissions)
 
 	results := make([]domain.SubmissionResult, len(submissions))
 	for i := range submissions {
@@ -82,10 +76,6 @@ func (r *Runner) Run(ctx context.Context, root string, callbacks RunnerCallbacks
 		finishedAt,
 		results,
 	)
-
-	if callbacks.OnAllComplete != nil {
-		callbacks.OnAllComplete(report)
-	}
 
 	return &report, nil
 }

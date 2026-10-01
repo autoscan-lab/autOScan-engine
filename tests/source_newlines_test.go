@@ -19,7 +19,7 @@ func TestScanReportsLinesForCROnlySource(t *testing.T) {
 
 	scanner := engine.NewScanEngine(&policy.Policy{BannedFunctions: []string{"printf"}})
 	sub := domain.NewSubmission("s1", dir, []string{"main.c"})
-	results := scanner.ScanAll([]domain.Submission{sub}, nil)
+	results := scanner.ScanAll([]domain.Submission{sub})
 
 	if len(results) != 1 || len(results[0].Hits) != 1 {
 		t.Fatalf("expected one banned hit, got %+v", results)

@@ -6,18 +6,15 @@ import (
 	"strings"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
-	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
 
 // macOSMetadataDir holds AppleDouble copies of every file in archives made by macOS "Compress".
 const macOSMetadataDir = "__MACOSX"
 
-type DiscoveryEngine struct {
-	policy *policy.Policy
-}
+type DiscoveryEngine struct{}
 
-func NewDiscoveryEngine(p *policy.Policy) *DiscoveryEngine {
-	return &DiscoveryEngine{policy: p}
+func NewDiscoveryEngine() *DiscoveryEngine {
+	return &DiscoveryEngine{}
 }
 
 // Discover finds all leaf folders that contain at least one .c file.

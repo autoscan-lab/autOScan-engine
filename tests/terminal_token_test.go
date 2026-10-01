@@ -28,24 +28,8 @@ func validClaims() terminal.Claims {
 	return terminal.Claims{
 		RunID:        "abc123",
 		SubmissionID: "Student_269539_assignsubmission_file",
+		SessionID:    "session-1",
 		Exp:          time.Now().Unix() + 60,
-	}
-}
-
-func TestParseTokenLegacySynthesizesSession(t *testing.T) {
-	secret := "test-secret"
-	claims := validClaims()
-	claims.Panes = 7 // ignored without a session id
-
-	got, err := terminal.ParseToken(secret, mintToken(t, secret, claims))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got.SessionID == "" {
-		t.Fatal("legacy token should get a synthesized session id")
-	}
-	if got.Panes != 1 {
-		t.Fatalf("legacy token panes = %d, want 1", got.Panes)
 	}
 }
 
@@ -58,7 +42,6 @@ func TestParseTokenClampsPanes(t *testing.T) {
 		{9, terminal.MaxPanesPerSession},
 	} {
 		claims := validClaims()
-		claims.SessionID = "session-1"
 		claims.Panes = tc.in
 		got, err := terminal.ParseToken(secret, mintToken(t, secret, claims))
 		if err != nil {
@@ -75,6 +58,12 @@ func TestParseTokenClampsPanes(t *testing.T) {
 
 func TestParseTokenRejects(t *testing.T) {
 	secret := "test-secret"
+
+	noSession := validClaims()
+	noSession.SessionID = ""
+	if _, err := terminal.ParseToken(secret, mintToken(t, secret, noSession)); err == nil {
+		t.Fatal("missing session id should be rejected")
+	}
 
 	badSession := validClaims()
 	badSession.SessionID = "a/b"
@@ -115,7 +104,7 @@ func TestParseTokenKeepsAssignment(t *testing.T) {
 
 func TestParseTokenSolutionNeedsOnlyAssignment(t *testing.T) {
 	secret := "test-secret"
-	claims := terminal.Claims{Assignment: "S2_BC", Solution: true, Exp: time.Now().Unix() + 60}
+	claims := terminal.Claims{Assignment: "S2_BC", Solution: true, SessionID: "session-1", Exp: time.Now().Unix() + 60}
 
 	got, err := terminal.ParseToken(secret, mintToken(t, secret, claims))
 	if err != nil {

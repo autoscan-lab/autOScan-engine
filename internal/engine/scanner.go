@@ -14,26 +14,18 @@ import (
 )
 
 type ScanEngine struct {
-	policy    *policy.Policy
 	bannedSet map[string]struct{}
-	parser    *sitter.Parser
 	lang      *sitter.Language
 }
 
 func NewScanEngine(p *policy.Policy) *ScanEngine {
-	parser := sitter.NewParser()
-	lang := c.GetLanguage()
-	parser.SetLanguage(lang)
-
 	return &ScanEngine{
-		policy:    p,
 		bannedSet: p.BannedSet(),
-		parser:    parser,
-		lang:      lang,
+		lang:      c.GetLanguage(),
 	}
 }
 
-func (e *ScanEngine) ScanAll(submissions []domain.Submission, onComplete func(domain.Submission, domain.ScanResult)) []domain.ScanResult {
+func (e *ScanEngine) ScanAll(submissions []domain.Submission) []domain.ScanResult {
 	results := make([]domain.ScanResult, len(submissions))
 
 	numWorkers := runtime.NumCPU()
@@ -71,10 +63,6 @@ func (e *ScanEngine) ScanAll(submissions []domain.Submission, onComplete func(do
 				mu.Lock()
 				results[idx] = result
 				mu.Unlock()
-
-				if onComplete != nil {
-					onComplete(sub, result)
-				}
 			}
 		}()
 	}

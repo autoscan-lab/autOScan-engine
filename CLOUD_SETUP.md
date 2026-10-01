@@ -57,7 +57,7 @@ starts it again on the next request. Leave the variable unset locally to never e
 - `DELETE /grade/{run_id}` - cancels a queued or running grade job (404 once finished)
 - `GET  /progress/{token}` - `{ fraction, stage, state, detail? }` for a grade run id
   or a sandbox progress token
-- `POST /sandbox/analyze` - ad-hoc similarity + AI detection on a zip, no run state
+- `POST /sandbox/analyze` - ad-hoc similarity + AI detection on a zip, no run state; waits for a running grade and returns 409 if it is still busy after 3 minutes
 - `GET  /terminal` - WebSocket, one connection per shell pane; auth is a
   short-lived HMAC token minted by the web app (not the secret header). Panes
   of one token share a sandboxed session. A token names either a graded

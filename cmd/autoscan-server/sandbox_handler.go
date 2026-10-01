@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
@@ -20,14 +21,10 @@ import (
 
 const sandboxSourceFile = "__sandbox.c"
 
-var submissionArchiveExts = []string{".tar.gz", ".tgz", ".tar", ".zip"}
+// Stays under the app's 300s limit on /sandbox/analyze.
+const sandboxSlotWait = 3 * time.Minute
 
-type sandboxSummary struct {
-	SubmissionCount    int `json:"submission_count"`
-	PairCount          int `json:"pair_count"`
-	FlaggedPairs       int `json:"flagged_pairs"`
-	FlaggedSubmissions int `json:"flagged_submissions"`
-}
+var submissionArchiveExts = []string{".tar.gz", ".tgz", ".tar", ".zip"}
 
 type sandboxFile struct {
 	Path      string `json:"path"`
@@ -45,7 +42,6 @@ type sandboxAnalyzeResponse struct {
 	Similarity  *domain.SimilarityReport  `json:"similarity,omitempty"`
 	AIDetection *domain.AIDetectionReport `json:"ai_detection,omitempty"`
 	Submissions []sandboxSubmissionSource `json:"submissions"`
-	Summary     sandboxSummary            `json:"summary"`
 }
 
 func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +58,11 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	progress := s.progressReporterFor(r)
 	defer progress.done()
+	if !s.acquireGradeSlot(r.Context(), progress) {
+		writeError(w, &httpError{status: 409, msg: "A grading run is in progress. Try again when it finishes."})
+		return
+	}
+	defer func() { <-s.gradeSlot }()
 	progress.report(0.03, "Downloading submissions")
 
 	workDir, err := os.MkdirTemp(s.cfg.dataDir, "sandbox-")
@@ -136,12 +137,6 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		Similarity:  &sim,
 		AIDetection: &ai,
 		Submissions: sources,
-		Summary: sandboxSummary{
-			SubmissionCount:    len(submissions),
-			PairCount:          countSimilarityPairs(&sim),
-			FlaggedPairs:       countFlaggedSimilarityPairs(&sim),
-			FlaggedSubmissions: countFlaggedAISubmissions(&ai),
-		},
 	})
 }
 
@@ -380,4 +375,25 @@ func concatCSources(dir string) (string, []sandboxFile, error) {
 		line += strings.Count(src, "\n") + 1
 	}
 	return b.String(), manifest, nil
+}
+
+// Sandbox analysis shares the grade slot so it can't slow a running grade into its test timeouts.
+func (s *server) acquireGradeSlot(ctx context.Context, progress progressReporter) bool {
+	select {
+	case s.gradeSlot <- struct{}{}:
+		return true
+	default:
+	}
+
+	progress.report(0.02, "Waiting for a grading run to finish")
+	timer := time.NewTimer(sandboxSlotWait)
+	defer timer.Stop()
+	select {
+	case s.gradeSlot <- struct{}{}:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }

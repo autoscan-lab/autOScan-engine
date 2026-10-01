@@ -2,11 +2,9 @@ package terminal
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -65,15 +63,7 @@ func ParseToken(secret, token string) (Claims, error) {
 		return Claims{}, errors.New("token expired")
 	}
 
-	if claims.SessionID == "" {
-		// Legacy single-pane token: synthesize a private session.
-		id, err := randomSessionID()
-		if err != nil {
-			return Claims{}, err
-		}
-		claims.SessionID = id
-		claims.Panes = 1
-	} else if !sessionIDPattern.MatchString(claims.SessionID) {
+	if !sessionIDPattern.MatchString(claims.SessionID) {
 		return Claims{}, errors.New("invalid session id")
 	}
 	if claims.Panes < 1 {
@@ -83,12 +73,4 @@ func ParseToken(secret, token string) (Claims, error) {
 		claims.Panes = MaxPanesPerSession
 	}
 	return claims, nil
-}
-
-func randomSessionID() (string, error) {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return "", errors.New("could not create session id")
-	}
-	return hex.EncodeToString(buf[:]), nil
 }

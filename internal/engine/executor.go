@@ -148,7 +148,7 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	binaryPath := e.GetBinaryPath(sub)
 	binaryDir := filepath.Dir(binaryPath)
 	if err := e.stageTestFiles(binaryDir); err != nil {
-		return domain.NewExecuteResult(false, "", err.Error(), 0, false, args, input)
+		return domain.NewExecuteResult(false, "", err.Error(), 0, false)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, DefaultExecTimeout)
@@ -157,7 +157,7 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
 	defer cleanup()
 	if preflightFailure != nil {
-		return domain.NewExecuteResult(false, "", preflightFailure.Message, 0, false, args, input).WithValgrind(preflightFailure)
+		return domain.NewExecuteResult(false, "", preflightFailure.Message, 0, false).WithValgrind(preflightFailure)
 	}
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
@@ -187,7 +187,7 @@ func (e *Executor) Execute(ctx context.Context, sub domain.Submission, args []st
 		}
 	}
 
-	return domain.NewExecuteResult(runOK, stdout.String(), stderr.String(), duration, timedOut, args, input).
+	return domain.NewExecuteResult(runOK, stdout.String(), stderr.String(), duration, timedOut).
 		WithValgrind(e.valgrindResultFromLog(valgrindLogPath)).
 		WithCrash(crashReasonFromExit(err, timedOut))
 }
@@ -256,8 +256,7 @@ func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath s
 	valgrindArgs := []string{
 		"--error-exitcode=97",
 		"--log-file=" + logPath,
-		"--dsymutil=yes",
-		"--track-origins=yes",
+		// No --track-origins: it roughly doubles Memcheck time and only enriches the log, which grading never shows.
 		"--leak-check=full",
 		"--track-fds=yes",
 		"--show-reachable=yes",
@@ -496,6 +495,5 @@ func computeMultiProcessStatus(result *domain.MultiProcessResult) {
 			allPassed = false
 		}
 	}
-	result.AllCompleted = true
 	result.AllPassed = allPassed
 }
