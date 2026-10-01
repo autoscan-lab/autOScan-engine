@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
@@ -19,6 +20,9 @@ import (
 )
 
 const sandboxSourceFile = "__sandbox.c"
+
+// Stays under the app's 300s limit on /sandbox/analyze.
+const sandboxSlotWait = 3 * time.Minute
 
 var submissionArchiveExts = []string{".tar.gz", ".tgz", ".tar", ".zip"}
 
@@ -54,6 +58,11 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	progress := s.progressReporterFor(r)
 	defer progress.done()
+	if !s.acquireGradeSlot(r.Context(), progress) {
+		writeError(w, &httpError{status: 409, msg: "A grading run is in progress. Try again when it finishes."})
+		return
+	}
+	defer func() { <-s.gradeSlot }()
 	progress.report(0.03, "Downloading submissions")
 
 	workDir, err := os.MkdirTemp(s.cfg.dataDir, "sandbox-")
@@ -366,4 +375,25 @@ func concatCSources(dir string) (string, []sandboxFile, error) {
 		line += strings.Count(src, "\n") + 1
 	}
 	return b.String(), manifest, nil
+}
+
+// Sandbox analysis shares the grade slot so it can't slow a running grade into its test timeouts.
+func (s *server) acquireGradeSlot(ctx context.Context, progress progressReporter) bool {
+	select {
+	case s.gradeSlot <- struct{}{}:
+		return true
+	default:
+	}
+
+	progress.report(0.02, "Waiting for a grading run to finish")
+	timer := time.NewTimer(sandboxSlotWait)
+	defer timer.Stop()
+	select {
+	case s.gradeSlot <- struct{}{}:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
