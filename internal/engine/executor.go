@@ -256,8 +256,7 @@ func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath s
 	valgrindArgs := []string{
 		"--error-exitcode=97",
 		"--log-file=" + logPath,
-		"--dsymutil=yes",
-		"--track-origins=yes",
+		// No --track-origins: it roughly doubles Memcheck time and only enriches the log, which grading never shows.
 		"--leak-check=full",
 		"--track-fds=yes",
 		"--show-reachable=yes",
