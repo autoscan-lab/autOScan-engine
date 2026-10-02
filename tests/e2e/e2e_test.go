@@ -141,6 +141,68 @@ func TestTerminalGetsTheRunsOwnPolicyFiles(t *testing.T) {
 	}
 }
 
+type paneProcesses struct {
+	Type      string `json:"type"`
+	Processes []struct {
+		Pid  int    `json:"pid"`
+		Name string `json:"name"`
+	} `json:"processes"`
+}
+
+// Grading a signals lab: a pane reports its foreground job's PID, and another pane of the session can signal it.
+func TestPaneReportsForegroundPidForSignals(t *testing.T) {
+	bc := gradeDone(t, "S2_BC", "fast")
+	session := fmt.Sprintf("e2e-pid-%d", time.Now().UnixNano())
+
+	ctx := context.Background()
+	wsURL := strings.Replace(engineURL, "http", "ws", 1) + "/terminal?token=" + mintSessionToken(bc, fastStudent, "S2_BC", session)
+	runner, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial terminal: %v", err)
+	}
+	defer runner.Close(websocket.StatusNormalClosure, "")
+	updates := make(chan paneProcesses, 16)
+	go func() {
+		for {
+			kind, data, err := runner.Read(ctx)
+			if err != nil {
+				close(updates)
+				return
+			}
+			var msg paneProcesses
+			if kind == websocket.MessageText && json.Unmarshal(data, &msg) == nil && msg.Type == "processes" {
+				updates <- msg
+			}
+		}
+	}()
+	next := func() paneProcesses {
+		select {
+		case msg, ok := <-updates:
+			if !ok {
+				t.Fatal("pane closed")
+			}
+			return msg
+		case <-time.After(10 * time.Second):
+			t.Fatal("no process update within 10s")
+		}
+		return paneProcesses{}
+	}
+
+	if err := runner.Write(ctx, websocket.MessageBinary, []byte("sleep 300\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	running := next()
+	if len(running.Processes) != 1 || running.Processes[0].Name != "sleep" {
+		t.Fatalf("want the sleep job, got %+v", running)
+	}
+
+	pid := running.Processes[0].Pid
+	terminalRun(t, mintSessionToken(bc, fastStudent, "S2_BC", session), fmt.Sprintf("kill -TERM %d", pid))
+	if done := next(); len(done.Processes) != 0 {
+		t.Fatalf("PID %d was not the sleep the other pane sees; still running: %+v", pid, done)
+	}
+}
+
 func TestSolutionTerminalBuildsFromThePolicy(t *testing.T) {
 	// No gcc: the engine builds the solution before the shell opens.
 	out, _ := terminalRun(t, mintSolutionToken("S2_BC"), "ls -1 && ./S2 bc_input.txt")
@@ -392,13 +454,18 @@ func engineRequest(t *testing.T, method, path string, body io.Reader, contentTyp
 
 // Mirrors the web app's /api/terminal token: base64url JSON claims, then base64url HMAC-SHA256.
 func mintToken(run, submission, assignment string) string {
+	return mintSessionToken(run, submission, assignment, fmt.Sprintf("e2e-%d", time.Now().UnixNano()))
+}
+
+// Each call is one more pane of session, as the web app mints them.
+func mintSessionToken(run, submission, assignment, session string) string {
 	claims, _ := json.Marshal(map[string]any{
 		"run_id":        run,
 		"submission_id": submission,
 		"assignment":    assignment,
 		"student":       "e2e",
-		"session_id":    fmt.Sprintf("e2e-%d", time.Now().UnixNano()),
-		"panes":         1,
+		"session_id":    session,
+		"panes":         4,
 		"exp":           time.Now().Add(time.Minute).Unix(),
 	})
 	payload := base64.RawURLEncoding.EncodeToString(claims)

@@ -24,6 +24,7 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
 | `TestGradeProducesPassingResults` | a grade job downloads the policy and submissions and writes a passing `result.json` |
 | `TestScenarioProcessesTalkOverLoopback` | a multi-process scenario runs in one sandbox: a server reaches two named instances of one client over 127.0.0.1, each with its own args and expected output |
 | `TestTerminalGetsTheRunsOwnPolicyFiles` | a terminal gets the libraries and test files of its own run, not of the last graded assignment |
+| `TestPaneReportsForegroundPidForSignals` | a pane reports its foreground job's PID as seen inside the sandbox, and another pane of the session can `kill` it by that PID |
 | `TestSolutionTerminalBuildsFromThePolicy` | a solution terminal gets the assignment's solution, libraries, and test files, with the solution already built and runnable |
 | `TestSolutionTerminalThatFailsToCompileSaysWhy` | a solution that doesn't compile closes the terminal with the compile error as the reason |
 | `TestSolutionTerminalWithoutSolutionCloses` | a solution terminal for an assignment with no solution files closes instead of opening an empty shell |

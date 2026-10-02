@@ -5,12 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
 )
+
+// How often a pane checks which job is in its foreground.
+const foregroundPoll = time.Second
+
+type paneProcess struct {
+	Pid  int    `json:"pid"`
+	Name string `json:"name"`
+}
 
 func ServePane(conn *websocket.Conn, ts *Session) {
 	master, ctl, _, err := OpenPane(ts.ctlPath, 80, 24)
@@ -73,6 +82,36 @@ func ServePane(conn *websocket.Conn, ts *Session) {
 			if readErr != nil {
 				finish("shell exited")
 				return
+			}
+		}
+	}()
+
+	// Text frames tell the browser the foreground job's PIDs, so a grader can signal it from another pane.
+	go func() {
+		ticker := time.NewTicker(foregroundPoll)
+		defer ticker.Stop()
+		var last []paneProcess
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				procs := foregroundProcesses(master)
+				if slices.Equal(procs, last) {
+					continue
+				}
+				last = procs
+				if procs == nil {
+					procs = []paneProcess{}
+				}
+				payload, err := json.Marshal(struct {
+					Type      string        `json:"type"`
+					Processes []paneProcess `json:"processes"`
+				}{"processes", procs})
+				if err == nil && conn.Write(ctx, websocket.MessageText, payload) != nil {
+					finish("connection closed")
+					return
+				}
 			}
 		}
 	}()
