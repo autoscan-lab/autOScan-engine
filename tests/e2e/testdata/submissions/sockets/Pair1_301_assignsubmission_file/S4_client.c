@@ -1,3 +1,10 @@
+/*
+ * Sample client that connects to the server and sends its last argument
+ * autOScan-engine local e2e fixtures
+ *
+ * @author: Felipe Trejos（◕‿◕）
+ */
+
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>

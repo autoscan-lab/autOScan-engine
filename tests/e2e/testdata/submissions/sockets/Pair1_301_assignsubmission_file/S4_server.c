@@ -1,3 +1,10 @@
+/*
+ * Sample server that accepts two clients on 127.0.0.1 and prints what each sends
+ * autOScan-engine local e2e fixtures
+ *
+ * @author: Felipe Trejos（◕‿◕）
+ */
+
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
