@@ -338,3 +338,31 @@ int explorar(int padre) {
 		t.Fatalf("reordered declarations scored %.1f%%, want >= 40%%", pair.SimilarityPercent)
 	}
 }
+
+// Without markers a function header plus declarations matched a run of plain declarations.
+func TestSimilarityDoesNotMatchHeadersAgainstDeclarations(t *testing.T) {
+	header := `int launch(int level, int total) {
+    int started = 0;
+    int result = 0;
+    int status;
+    return started + result + status + level * total;
+}
+`
+	declarations := `int explore(void) {
+    int level;
+    int rarity;
+    int total;
+    int launched = 0;
+    int failed = 0;
+    int status;
+    while (launched < 3) {
+        launched++;
+    }
+    return failed;
+}
+`
+	scores := similarityScores(t, map[string]string{"header": header, "declarations": declarations})
+	if pair := scores[[2]string{"header", "declarations"}]; len(pair.Matches) != 0 {
+		t.Fatalf("header matched declarations: %.1f%% with %d tiles", pair.SimilarityPercent, len(pair.Matches))
+	}
+}

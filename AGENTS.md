@@ -70,7 +70,8 @@ docker compose -f tests/e2e/compose.yml down
 - Keep comments to one short line explaining why. No history or narration.
 - Keep changes tight. Avoid drive-by refactors.
 - **Limits:**
-  - Grade jobs run one at a time.
+  - Grade jobs run one at a time; within a job, tests run one submission per
+    CPU (multi-process labs stay sequential).
   - Terminals are capped at 16 sessions of up to 4 panes.
   - If you change either, keep the concurrency limits in `fly.toml` in line.
 - Temporary files are fine while working. Delete them before finishing.

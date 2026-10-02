@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"sync"
 	"sync/atomic"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
@@ -100,8 +102,11 @@ func runGradingPipeline(ctx context.Context, cfg config, configDir, workspaceDir
 
 	executor := engine.NewExecutor(loadedPolicy, binaryDir)
 
+	var executedMu sync.Mutex
 	executed := 0
 	reportExecuted := func() {
+		executedMu.Lock()
+		defer executedMu.Unlock()
 		executed++
 		share := float64(executed) / float64(len(resp.Results))
 		progress.report(
@@ -119,10 +124,11 @@ func runGradingPipeline(ctx context.Context, cfg config, configDir, workspaceDir
 	} else if len(loadedPolicy.Run.TestCases) > 0 {
 		progress.report(gradeExecuteStart, "Running submissions")
 		expected := loadExpectedOutputs(loadedPolicy)
-		for i := range resp.Results {
+		// One submission per CPU: Valgrind is single-threaded and test timeouts are wall-clock.
+		forEachSubmission(len(resp.Results), runtime.NumCPU(), func(i int) {
 			runTestCases(ctx, executor, loadedPolicy, report.Results[i], &resp.Results[i], expected)
 			reportExecuted()
-		}
+		})
 	}
 
 	for i := range resp.Results {
@@ -257,4 +263,26 @@ func readSourceFiles(sub domain.Submission) []sourceFile {
 		files = append(files, sourceFile{Name: name, Content: string(data)})
 	}
 	return files
+}
+
+func forEachSubmission(n, workers int, fn func(i int)) {
+	if workers < 1 {
+		workers = 1
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				fn(i)
+			}
+		}()
+	}
+	for i := 0; i < n; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 }

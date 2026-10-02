@@ -124,6 +124,11 @@ func normalizeTokens(node *sitter.Node, content []byte, declared map[string]bool
 		text = "@CHAR"
 	default:
 		if node.ChildCount() > 0 {
+			// Punctuation is dropped, so mark where parameters and the body start; otherwise
+			// a header like `int f(int a, int b) { int c;` reads the same as plain declarations.
+			if marker := structureMarker(node); marker != "" {
+				*tokens = append(*tokens, token{text: marker, start: node.StartByte(), end: node.StartByte() + 1})
+			}
 			for i := 0; i < int(node.ChildCount()); i++ {
 				normalizeTokens(node.Child(i), content, declared, tokens)
 			}
@@ -135,6 +140,20 @@ func normalizeTokens(node *sitter.Node, content []byte, declared map[string]bool
 	if text != "" {
 		*tokens = append(*tokens, token{text: text, start: node.StartByte(), end: node.EndByte()})
 	}
+}
+
+func structureMarker(node *sitter.Node) string {
+	parent := node.Parent()
+	if parent == nil {
+		return ""
+	}
+	switch {
+	case node.Type() == "parameter_list" && parent.Type() == "function_declarator":
+		return "@PARAMS"
+	case node.Type() == "compound_statement" && parent.Type() == "function_definition":
+		return "@BODY"
+	}
+	return ""
 }
 
 func normalizeToken(node *sitter.Node, content []byte, declared map[string]bool) string {
