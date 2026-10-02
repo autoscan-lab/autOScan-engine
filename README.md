@@ -37,7 +37,7 @@ service setup, deployment, environment variables, and HTTP API details, see
   different panes can IPC
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via Greedy String Tiling over normalized C tokens
-- AI-pattern detection: how much of each dictionary entry appears in a submission
+- AI-pattern detection: the share of a submission's code made of dictionary patterns
 - Policy parsing and validation helpers
 - Public Go facade package (`pkg/engine`) for autOScan apps/tools
 

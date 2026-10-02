@@ -93,7 +93,7 @@ func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, 
 	if minScore > 0 {
 		filtered := report.Submissions[:0]
 		for _, submission := range report.Submissions {
-			if submission.BestScore*100 >= minScore {
+			if submission.Score*100 >= minScore {
 				filtered = append(filtered, submission)
 			}
 		}
