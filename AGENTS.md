@@ -76,4 +76,5 @@ docker compose -f tests/e2e/compose.yml down
 - Temporary files are fine while working. Delete them before finishing.
 - Never commit secrets. `.env` is ignored, and `.env.example` lists the
   required variables.
-- Changes land on `main` through a pull request.
+- Work lands on `dev` and reaches `main` through a pull request. Deploy
+  (`fly deploy`) from `main`.
