@@ -36,6 +36,38 @@ ENGINE_SECRET=your-shared-secret
 the SeaweedFS store in the local stack ([tests/e2e](tests/e2e/README.md)).
 `PORT` (default `8080`) and `AUTOSCAN_DATA_DIR` (default `/data`) are optional too.
 
+### Automatic AI reanalysis
+
+On startup after deployment, the engine refreshes saved runs whose
+`ai_detection.method` differs from `contextual-v2`. It scans `web/runs/` by
+default; set `R2_APP_PREFIX` to the frontend's prefix, or
+`AUTOSCAN_AI_RESULT_PREFIX` to its complete result prefix, if customized.
+No manual submission reruns are needed. Merging into `dev` does not deploy;
+the refresh starts when the new engine is deployed from `main` and starts.
+
+The worker reconstructs sources from each saved `result.json`, recomputes
+style, scores and peer statistics for the whole run, and changes only
+`ai_detection` plus `ai_reanalysis` provenance. It preserves grading, tests,
+similarity, original dictionary matches and archive-only tool evidence.
+The student programs are never compiled or executed. Original uploads and
+local grading workspaces are not needed. Missing saved sources remain failed
+and visible in progress rather than receiving invented scores.
+
+Before updating, the previous result is backed up under
+`<prefix>/<run-id>/ai-revisions/contextual-v2/<content-sha256>.json`.
+Conditional object writes prevent overwriting concurrent updates or recreating
+deleted runs. Successful method stamps are durable checkpoints. The worker
+retries failures and rescans every five minutes while running, resumes on
+restart, shares the grading queue, and counts as active work for idle exit.
+Per-pass progress is saved at
+`/data/ai-reanalysis/contextual-v2/status.json`; inspect the authenticated
+`GET /ai-reanalysis` endpoint for method, state, scanned, updated, current,
+failed and last error. Bump `domain.AIDetectionMethod` whenever future detector
+changes require refreshing saved runs. Backups are excluded from scanning.
+
+The app reads refreshed results at the existing keys. AI-history cache entries
+expire within 60 seconds; reopening or refreshing a run reads its latest report.
+
 ## 3. Deploy
 
 ```bash
@@ -54,6 +86,7 @@ starts it again on the next request. Leave the variable unset locally to never e
 ## Endpoints
 
 - `GET  /health`
+- `GET  /ai-reanalysis` - authenticated automatic AI backfill progress
 - `POST /grade` - async grading: form fields `assignment`, `r2_key`,
   `result_key_prefix`, `export_key_prefix`; returns `202 { run_id }` and writes
   `<result_key_prefix>/<run_id>/result.json` when done. Jobs run one at a time;

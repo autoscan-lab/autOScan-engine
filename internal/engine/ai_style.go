@@ -78,6 +78,7 @@ type choiceCounts map[string]int
 
 type styleCounts struct {
 	codeLines int
+	stats     domain.AISourceStats
 
 	eligibleComments, proseComments int
 	functions, documentedFunctions  int
@@ -96,6 +97,7 @@ func newStyleCounts() *styleCounts {
 		choices:        map[string]choiceCounts{},
 		locations:      map[string][]domain.AISourceEvidence{},
 		locationCounts: map[string]int{},
+		stats:          domain.AISourceStats{PatternCounts: map[string]int{}},
 	}
 }
 
@@ -112,10 +114,10 @@ func AnalyzeSubmissionStyle(sub domain.Submission) (*domain.AIStyleReport, []dom
 	return style, tells
 }
 
-func analyzeSubmissionStyle(sub domain.Submission) (*domain.AIStyleReport, []domain.AITell, [][]string) {
+func analyzeSubmissionStyle(sub domain.Submission) (*domain.AIStyleReport, []domain.AITell, [][]metricToken) {
 	counts := newStyleCounts()
 	tells := artifactTells(sub)
-	var tokens [][]string
+	var tokens [][]metricToken
 	names := append([]string(nil), sub.CFiles...)
 	sort.Strings(names)
 	for _, name := range names {
@@ -135,7 +137,7 @@ func analyzeSubmissionStyle(sub domain.Submission) (*domain.AIStyleReport, []dom
 	return scoreStyle(counts), tells, tokens
 }
 
-func analyzeStyleSource(name string, content []byte, counts *styleCounts) ([]domain.AITell, []string) {
+func analyzeStyleSource(name string, content []byte, counts *styleCounts) ([]domain.AITell, []metricToken) {
 	parser := sitter.NewParser()
 	defer parser.Close()
 	parser.SetLanguage(c.GetLanguage())
@@ -146,22 +148,47 @@ func analyzeStyleSource(name string, content []byte, counts *styleCounts) ([]dom
 	defer tree.Close()
 	root := tree.RootNode()
 	tells := sourceTells(name, content, root)
+	var attributes []attributeSpan
 	if root.HasError() {
-		return tells, nil
+		masked, spans := compatibleUnusedAttributes(content)
+		if len(spans) == 0 {
+			return tells, nil
+		}
+		compatible, err := parser.ParseCtx(context.Background(), nil, masked)
+		if err != nil {
+			return tells, nil
+		}
+		defer compatible.Close()
+		if compatible.RootNode().HasError() {
+			return tells, nil
+		}
+		root, attributes = compatible.RootNode(), spans
 	}
-	tells = append(tells, codePatternTells(name, content, root)...)
+	patterns, patternCounts := codePatternTells(name, content, root)
+	tells = append(tells, patterns...)
+	for kind, count := range patternCounts {
+		counts.stats.PatternCounts[kind] += count
+	}
 
-	a := &styleAnalysis{file: name, content: content, counts: counts, header: headerEnd(root)}
+	a := &styleAnalysis{file: name, content: content, counts: counts, header: headerEnd(root), signalHandlers: registeredSignalHandlers(root, content)}
 	a.countLines()
 	a.walk(root)
 	a.comments()
-	return tells, lexicalTokens(root, content)
+	for _, attribute := range attributes {
+		a.counts.idioms["unused attributes"]++
+		a.evidence("defensive_idioms", "unused attributes", strings.Count(string(content[:attribute.start]), "\n")+1,
+			strings.Count(string(content[:attribute.end]), "\n")+1, string(content[attribute.start:attribute.end]))
+	}
+	tokens := lexicalTokens(root, content, name)
+	counts.stats.TokenCount += len(tokens)
+	return tells, tokens
 }
 
 type styleAnalysis struct {
-	file    string
-	content []byte
-	counts  *styleCounts
+	file           string
+	signalHandlers map[string]bool
+	content        []byte
+	counts         *styleCounts
 	// Byte offset where the leading comment block (names and logins) ends.
 	header      uint32
 	commentList []*sitter.Node
@@ -238,13 +265,47 @@ func (a *styleAnalysis) countLines() {
 }
 
 func (a *styleAnalysis) walk(node *sitter.Node) {
+	if node.Type() == "preproc_def" {
+		if value := node.ChildByFieldName("value"); value != nil && temporaryPathLiteral.MatchString(strings.TrimSpace(value.Content(a.content))) {
+			a.idiom("literal /tmp paths", value)
+		}
+		return
+	}
+	if insideMacro(node) {
+		return
+	}
+	a.courseDeclaration(node)
+	if (node.Type() == "parameter_declaration" || node.Type() == "field_declaration") && signalStateDeclaration(node, a.content) {
+		a.idiom("volatile/sig_atomic_t declarations", node)
+	}
+	if node.Type() == "declaration" || node.Type() == "type_definition" {
+		if signalStateDeclaration(node, a.content) {
+			a.idiom("volatile/sig_atomic_t declarations", node)
+		}
+		for i := 0; i < int(node.ChildCount()); i++ {
+			if node.FieldNameForChild(i) != "declarator" {
+				continue
+			}
+			for _, part := range declaratorChain(node.Child(i)) {
+				if part.Type() == "array_declarator" {
+					a.counts.stats.Arrays++
+					break
+				}
+			}
+		}
+	}
 	switch node.Type() {
+	case "string_literal":
+		if temporaryPathLiteral.MatchString(node.Content(a.content)) {
+			a.idiom("literal /tmp paths", node)
+		}
 	case "comment":
 		a.commentList = append(a.commentList, node)
 		return
 	case "function_definition":
 		a.function(node)
 	case "call_expression":
+		a.counts.stats.Calls++
 		a.call(node)
 	case "binary_expression", "assignment_expression":
 		a.operatorSpacing(node.ChildByFieldName("operator"))
@@ -339,6 +400,7 @@ func (a *styleAnalysis) walk(node *sitter.Node) {
 	case "pointer_declarator":
 		a.pointerStar(node)
 	case "if_statement", "while_statement", "for_statement", "switch_statement":
+		a.counts.stats.Conditions++
 		if node.Type() == "while_statement" {
 			body := node.ChildByFieldName("body")
 			condition := node.ChildByFieldName("condition")
@@ -349,6 +411,7 @@ func (a *styleAnalysis) walk(node *sitter.Node) {
 		}
 		if kw := node.Child(0); kw != nil && kw.EndByte() < uint32(len(a.content)) {
 			a.counts.choose("keyword_paren", map[bool]string{true: "space", false: "tight"}[isSpace(a.content[kw.EndByte()])])
+			a.exactGap("keyword_gap", kw.EndByte(), node.Child(1).StartByte())
 		}
 	case "compound_statement":
 		a.block(node)
@@ -363,6 +426,13 @@ func (a *styleAnalysis) walk(node *sitter.Node) {
 			if value != nil && value.Type() == "identifier" {
 				a.idiom("unused-variable (void) casts", node)
 			}
+			if value != nil && value.Type() == "call_expression" {
+				a.idiom("discarded call results (void)", node)
+			}
+		}
+	case "attribute_specifier", "attribute_declaration":
+		if hasUnusedAttribute(node, a.content) {
+			a.idiom("unused attributes", node)
 		}
 	case "identifier":
 		switch node.Content(a.content) {
@@ -370,6 +440,8 @@ func (a *styleAnalysis) walk(node *sitter.Node) {
 			a.idiom("EXIT_SUCCESS/EXIT_FAILURE", node)
 		case "EINTR", "EAGAIN":
 			a.idiom("errno retries", node)
+		case "errno":
+			a.idiom("errno access", node)
 		case "__func__":
 			a.idiom("__func__", node)
 		case "STDOUT_FILENO", "STDERR_FILENO", "STDIN_FILENO":
@@ -379,10 +451,17 @@ func (a *styleAnalysis) walk(node *sitter.Node) {
 		switch node.Content(a.content) {
 		case "size_t", "ssize_t":
 			a.idiom("size_t/ssize_t", node)
+		case "bool", "_Bool":
+			a.idiom("boolean types", node)
+		case "sem_t":
+			a.idiom("POSIX semaphores", node)
 		}
 	case ",":
 		if p := node.Parent(); p != nil && (p.Type() == "argument_list" || p.Type() == "parameter_list") && node.EndByte() < uint32(len(a.content)) {
 			a.counts.choose("comma_space", map[bool]string{true: "space", false: "tight"}[isSpace(a.content[node.EndByte()])])
+			if next := node.NextSibling(); next != nil {
+				a.exactGap("comma_gap", node.EndByte(), next.StartByte())
+			}
 		}
 	}
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -445,8 +524,22 @@ func (a *styleAnalysis) call(node *sitter.Node) {
 	}
 	if args != nil {
 		a.counts.choose("call_paren", map[bool]string{true: "tight", false: "space"}[fn.EndByte() == args.StartByte()])
+		a.exactGap("call_gap", fn.EndByte(), args.StartByte())
 	}
 	name := fn.Content(a.content)
+	if posixSemaphoreCalls[name] {
+		a.idiom("POSIX semaphores", node)
+	}
+	if name == "exit" || name == "_exit" {
+		for owner := node.Parent(); owner != nil; owner = owner.Parent() {
+			if owner.Type() == "function_definition" {
+				if a.signalHandlers[nameOf(owner.ChildByFieldName("declarator"), a.content)] {
+					a.idiom("exit from registered signal handlers", node)
+				}
+				break
+			}
+		}
+	}
 	switch name {
 	case "perror", "snprintf", "assert", "strerror", "memset":
 		a.idiom(name, node)
@@ -726,6 +819,18 @@ func (a *styleAnalysis) operatorSpacing(op *sitter.Node) {
 		return
 	}
 	before, after := isSpace(a.content[op.StartByte()-1]), isSpace(a.content[op.EndByte()])
+	if left, right := op.PrevSibling(), op.NextSibling(); left != nil && right != nil {
+		family := "arithmetic_gap"
+		switch op.Type() {
+		case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+			family = "assignment_gap"
+		case "==", "!=", "<", "<=", ">", ">=":
+			family = "comparison_gap"
+		case "&&", "||":
+			family = "logical_gap"
+		}
+		a.counts.choose(family, gapLabel(a.content[left.EndByte():op.StartByte()])+" / "+gapLabel(a.content[op.EndByte():right.StartByte()]))
+	}
 	switch {
 	case before && after:
 		a.counts.choose("operator_space", "both")
@@ -733,6 +838,26 @@ func (a *styleAnalysis) operatorSpacing(op *sitter.Node) {
 		a.counts.choose("operator_space", "none")
 	default:
 		a.counts.choose("operator_space", "one_side")
+	}
+}
+
+func gapLabel(gap []byte) string {
+	text := string(gap)
+	if strings.TrimSpace(text) != "" {
+		return "comment"
+	}
+	if strings.ContainsAny(text, "\r\n") {
+		return "newline"
+	}
+	if strings.Contains(text, "\t") {
+		return fmt.Sprintf("%d tabs + %d spaces", strings.Count(text, "\t"), strings.Count(text, " "))
+	}
+	return fmt.Sprintf("%d spaces", len(text))
+}
+
+func (a *styleAnalysis) exactGap(key string, start, end uint32) {
+	if start <= end && end <= uint32(len(a.content)) {
+		a.counts.choose(key, gapLabel(a.content[start:end]))
 	}
 }
 
@@ -802,7 +927,7 @@ func (a *styleAnalysis) elsePlacement(node *sitter.Node) {
 
 func nameOf(node *sitter.Node, content []byte) string {
 	for node != nil {
-		if node.Type() == "identifier" {
+		if node.Type() == "identifier" || node.Type() == "field_identifier" || node.Type() == "type_identifier" {
 			return node.Content(content)
 		}
 		node = node.ChildByFieldName("declarator")
@@ -831,6 +956,8 @@ func (a *styleAnalysis) declaredName(node *sitter.Node) {
 	}
 	if upper >= 2 && !lower {
 		a.idiom("uppercase variable names", target)
+	} else if first, _ := utf8.DecodeRuneInString(name); unicode.IsUpper(first) {
+		a.idiom("capitalized variable or field names", target)
 	}
 	a.namingStyle(name)
 }
@@ -979,21 +1106,46 @@ var choiceLabels = map[string]string{
 	"indent_alignment": "indentation", "keyword_paren": "space after if/for/while", "operator_space": "spaces around operators",
 	"comma_space": "space after commas", "call_paren": "space before call parentheses", "brace_function": "function brace placement",
 	"brace_control": "brace placement", "else_placement": "else placement", "pointer_star": "pointer star placement",
-	"comment_space": "space after //",
+	"comment_space":  "space after //",
+	"assignment_gap": "assignment spacing", "comparison_gap": "comparison spacing", "logical_gap": "logical operator spacing",
+	"arithmetic_gap": "arithmetic spacing", "keyword_gap": "control parentheses spacing", "comma_gap": "comma spacing", "call_gap": "call parentheses spacing",
+}
+
+func sampleSupport(samples, target int) float64 {
+	return math.Sqrt(math.Min(1, float64(samples)/float64(target)))
 }
 
 func scoreStyle(counts *styleCounts) *domain.AIStyleReport {
 	var features []domain.AIStyleFeature
 	add := func(def styleFeatureDef, value float64, detail string) {
+		samples, target := 0, 1
+		switch def.key {
+		case "prose_comments":
+			samples, target = counts.eligibleComments, 10
+		case "doc_headers":
+			samples, target = counts.functions, 8
+		case "error_checks":
+			samples, target = counts.checkableCalls, 10
+		case "defensive_idioms":
+			samples, target = counts.stats.TokenCount, 400
+		}
+		reliability := 1.0
+		if def.evidence == evidenceReview {
+			reliability = sampleSupport(samples, target)
+		}
+		if reliability > 0 && reliability < 1 {
+			detail += fmt.Sprintf("; sample support %.0f%%", reliability*100)
+		}
 		features = append(features, domain.AIStyleFeature{
 			Key: def.key, Label: def.label, Evidence: def.evidence, Value: round3(value),
 			Score: round3(def.ramp.score(value)), Weight: def.weight, Detail: detail,
+			SampleCount: samples, Reliability: round3(reliability),
 			Locations: counts.locations[def.key], LocationCount: counts.locationCounts[def.key],
 		})
 	}
 
 	// Keep absent comments in the denominator when enough code is present.
-	if counts.codeLines >= minCodeLines || counts.eligibleComments >= minEligibleComments {
+	if counts.codeLines >= minCodeLines || counts.stats.TokenCount >= minMetricTokens || counts.eligibleComments >= minEligibleComments {
 		detail := fmt.Sprintf("%d of %d comments are full sentences", counts.proseComments, counts.eligibleComments)
 		if counts.eligibleComments == 0 {
 			detail = "No comments besides the file header"
@@ -1008,12 +1160,13 @@ func scoreStyle(counts *styleCounts) *domain.AIStyleReport {
 		add(featureErrorChecks, ratio(counts.checkedCalls, counts.checkableCalls),
 			fmt.Sprintf("%d of %d write/read/pipe/malloc-style calls check the result", counts.checkedCalls, counts.checkableCalls))
 	}
-	if counts.codeLines >= minCodeLines {
+	if counts.codeLines >= minCodeLines || counts.stats.TokenCount >= minMetricTokens {
 		total := 0
 		for _, n := range counts.idioms {
 			total += min(n, maxIdiomCount)
 		}
-		add(featureIdioms, float64(total)*100/float64(counts.codeLines), idiomDetail(counts.idioms, counts.codeLines))
+		effectiveLines := max(counts.codeLines, (counts.stats.TokenCount+11)/12)
+		add(featureIdioms, float64(total)*100/float64(effectiveLines), idiomDetail(counts.idioms, counts.codeLines))
 	}
 	if h, detail, ok := formattingEntropy(counts.choices); ok {
 		add(featureFormatEntropy, h, detail)
@@ -1033,8 +1186,8 @@ func scoreStyle(counts *styleCounts) *domain.AIStyleReport {
 			continue
 		}
 		usedWeight += f.Weight
-		weighted += f.Weight * f.Score
-		if f.Score >= 0.5 {
+		weighted += f.Weight * f.Score * f.Reliability
+		if f.Score*f.Reliability >= 0.5 {
 			switch f.Key {
 			case "prose_comments", "doc_headers":
 				commentEvidence = true
@@ -1046,9 +1199,10 @@ func scoreStyle(counts *styleCounts) *domain.AIStyleReport {
 		}
 	}
 
-	report := &domain.AIStyleReport{Features: features}
+	counts.stats.CodeLines = counts.codeLines
+	report := &domain.AIStyleReport{Features: features, SourceStats: &counts.stats, Formatting: formattingChoices(counts.choices)}
 	if usedWeight > 0 {
-		report.Score = round3(weighted / usedWeight)
+		report.Score = round3(weighted / totalWeight)
 	}
 	supported := 0
 	for _, evidence := range []bool{commentEvidence, callEvidence, idiomEvidence} {
@@ -1067,7 +1221,14 @@ func formattingEntropy(choices map[string]choiceCounts) (float64, string, bool) 
 	}
 	var points []point
 	for key, counts := range choices {
-		h, n := choiceEntropy(counts, choiceVariants[key])
+		if key == "trailing_space" || key == "blank_lines" || key == "keyword_paren" || key == "operator_space" || key == "comma_space" || key == "call_paren" {
+			continue
+		}
+		variants := choiceVariants[key]
+		if variants == 0 {
+			variants = max(2, len(counts))
+		}
+		h, n := choiceEntropy(counts, variants)
 		if n >= minChoiceSamples {
 			points = append(points, point{key, h})
 		}
@@ -1097,6 +1258,29 @@ func formattingEntropy(choices map[string]choiceCounts) (float64, string, bool) 
 		detail = fmt.Sprintf("Varies in %s (%d choices measured)", strings.Join(varied, ", "), len(points))
 	}
 	return mean, detail, true
+}
+
+func formattingChoices(choices map[string]choiceCounts) []domain.AIFormattingChoice {
+	var result []domain.AIFormattingChoice
+	for key, counts := range choices {
+		if !strings.HasSuffix(key, "_gap") && key != "indent_alignment" && key != "indent_char" {
+			continue
+		}
+		variants := max(2, len(counts))
+		h, n := choiceEntropy(counts, variants)
+		if n < minChoiceSamples {
+			continue
+		}
+		choice := domain.AIFormattingChoice{Key: key, Label: choiceLabels[key], SampleCount: n, Entropy: round3(h)}
+		for variant, count := range counts {
+			if count > choice.DominantCount || (count == choice.DominantCount && variant < choice.Dominant) {
+				choice.Dominant, choice.DominantCount = variant, count
+			}
+		}
+		result = append(result, choice)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
+	return result
 }
 
 func idiomDetail(idioms map[string]int, lines int) string {

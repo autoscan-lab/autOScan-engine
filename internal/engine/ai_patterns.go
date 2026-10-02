@@ -49,9 +49,11 @@ func foldedCallText(node *sitter.Node, content []byte) string {
 }
 
 // These requested code patterns suggest review, without asserting authorship.
-func codePatternTells(file string, content []byte, root *sitter.Node) []domain.AITell {
+func codePatternTells(file string, content []byte, root *sitter.Node) ([]domain.AITell, map[string]int) {
 	var tells []domain.AITell
+	counts := map[string]int{}
 	add := func(kind, label string, node *sitter.Node) {
+		counts[kind]++
 		if len(tells) >= 64 {
 			return
 		}
@@ -96,5 +98,5 @@ func codePatternTells(file string, content []byte, root *sitter.Node) []domain.A
 		}
 	}
 	visit(root)
-	return tells
+	return tells, counts
 }

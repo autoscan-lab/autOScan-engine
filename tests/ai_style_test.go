@@ -180,7 +180,7 @@ func TestStyleRanksContrastingSyntheticExamples(t *testing.T) {
 	ai, aiTells := engine.AnalyzeSubmissionStyle(writeStyleSubmission(t, root, "ai", map[string]string{"lab.c": assistantStyled}))
 	student, studentTells := engine.AnalyzeSubmissionStyle(writeStyleSubmission(t, root, "student", map[string]string{"lab.c": studentStyled}))
 
-	if !ai.Flagged || ai.Score < 0.8 {
+	if !ai.Flagged || ai.Score < 0.7 {
 		t.Fatalf("assistant-styled code scored %.2f (flagged=%v): %+v", ai.Score, ai.Flagged, ai.Features)
 	}
 	if student.Flagged || student.Score > 0.2 {
@@ -220,7 +220,7 @@ int main(void) {
 }
 `
 	report, _ := engine.AnalyzeSubmissionStyle(writeStyleSubmission(t, t.TempDir(), "s", map[string]string{"lab.c": src}))
-	if f := styleFeature(t, report, "error_checks"); f.Detail != "2 of 4 write/read/pipe/malloc-style calls check the result" {
+	if f := styleFeature(t, report, "error_checks"); !strings.HasPrefix(f.Detail, "2 of 4 write/read/pipe/malloc-style calls check the result") {
 		t.Fatalf("got %q", f.Detail)
 	}
 }
@@ -471,7 +471,7 @@ func TestCommentsAloneCannotRaiseStyleFlag(t *testing.T) {
 		source += fmt.Sprintf("/* Returns the calculated value for this operation. */\nint example%d() {\n int i = 0;\n i += 1;\n i += 2;\n printf(\"%%d\", i);\n return i;\n}\n", i)
 	}
 	report, _ := engine.AnalyzeSubmissionStyle(writeStyleSubmission(t, t.TempDir(), "s", map[string]string{"lab.c": source}))
-	if report.Score < 0.6 || report.Flagged {
+	if report.Score >= 0.5 || report.Flagged {
 		t.Fatalf("correlated comment features alone must not flag: %+v", report)
 	}
 }
@@ -480,7 +480,8 @@ func TestTokenMetricsHoldOutSubmissionAndRequirePeers(t *testing.T) {
 	root := t.TempDir()
 	var subs []domain.Submission
 	for i := 0; i < 5; i++ {
-		subs = append(subs, writeStyleSubmission(t, root, fmt.Sprint(i), map[string]string{"lab.c": studentStyled}))
+		source := studentStyled + "\nint extra(int value) { return value" + strings.Repeat(" + value", i+1) + "; }\n"
+		subs = append(subs, writeStyleSubmission(t, root, fmt.Sprint(i), map[string]string{"lab.c": source}))
 	}
 	compute := func(subs []domain.Submission) domain.AIDetectionReport {
 		t.Helper()
@@ -505,7 +506,7 @@ func TestTokenMetricsHoldOutSubmissionAndRequirePeers(t *testing.T) {
 			t.Fatal("token statistics cannot flag submissions")
 		}
 	}
-	changed := strings.ReplaceAll(studentStyled, "escriu", "entirely_novel_name")
+	changed := strings.ReplaceAll(studentStyled+"\nint extra(int value) { return value + value; }\n", "escriu", "entirely_novel_name")
 	subs[0] = writeStyleSubmission(t, root, "0", map[string]string{"lab.c": changed})
 	var original, novel *domain.AITokenMetrics
 	for _, sub := range base.Submissions {

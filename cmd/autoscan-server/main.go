@@ -53,6 +53,7 @@ func main() {
 		progress:  newProgressTracker(),
 		activity:  newActivity(),
 		gradeSlot: make(chan struct{}, 1),
+		aiRefresh: &aiRefreshProgress{},
 	}
 
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -65,6 +66,7 @@ func main() {
 	mux.Handle("DELETE /grade/{run_id}", protected(srv.cancelGrade))
 	mux.Handle("POST /sandbox/analyze", protected(srv.sandboxAnalyze))
 	mux.Handle("GET /progress/{token}", protected(srv.progressStatus))
+	mux.Handle("GET /ai-reanalysis", protected(srv.aiReanalysisStatus))
 	// Token-authenticated instead of withSecret: the browser connects directly and cannot carry the engine secret.
 	mux.HandleFunc("GET /terminal", srv.terminal)
 
@@ -76,6 +78,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go srv.refreshSavedAI(ctx)
 
 	if cfg.idleExit > 0 {
 		go exitWhenIdle(ctx, srv.activity, cfg.idleExit, stop)
@@ -104,7 +107,8 @@ type server struct {
 	progress  *progressTracker
 	activity  *activity
 	// run id -> context.CancelFunc for in-flight async grade jobs.
-	jobs sync.Map
+	jobs      sync.Map
+	aiRefresh *aiRefreshProgress
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
