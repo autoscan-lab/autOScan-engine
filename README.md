@@ -92,6 +92,30 @@ Every executable in `run.multi_process.executables` is launched concurrently. Th
 call blocks until each process exits (or `ctx` is cancelled) and returns one
 `*domain.MultiProcessResult` with buffered stdout/stderr per process.
 
+A process is keyed by its source file's stem (`S4_client.c` -> `S4_client`) in
+scenario `process_*` maps, `expected_outputs`, and results. To run one source
+more than once, give each entry a `name`; the source is compiled once:
+
+```yaml
+executables:
+  - source_file: S4_server.c
+  - source_file: S4_client.c
+    name: client_forward
+  - source_file: S4_client.c
+    name: client_inverted
+```
+
+With bubblewrap installed, all processes of a scenario share one sandbox (and
+its loopback, PIDs, and IPC), run by re-executing the current program with
+`engine.ScenarioHostArg`. A program that runs scenarios must dispatch that mode
+from `main`:
+
+```go
+if len(os.Args) == 2 && os.Args[1] == engine.ScenarioHostArg {
+	os.Exit(engine.RunScenarioHost())
+}
+```
+
 ## Package Layout
 
 ```text

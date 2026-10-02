@@ -3,6 +3,7 @@ package tests
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
@@ -70,4 +71,60 @@ func TestPolicyParsesScenarioOwnedProcessConfig(t *testing.T) {
 	if got := scenario.ProcessDelays["S4_client"]; got != 50 {
 		t.Fatalf("unexpected scenario delay: %d", got)
 	}
+}
+
+func TestPolicyNamesInstancesOfOneSource(t *testing.T) {
+	p := loadPolicyYaml(t, `name: S4_BC
+run:
+  multi_process:
+    enabled: true
+    executables:
+      - source_file: S4_server.c
+      - source_file: S4_client.c
+        name: client_forward
+      - source_file: S4_client.c
+        name: client_inverted
+`)
+	var names, binaries []string
+	for _, proc := range p.Run.MultiProcess.Executables {
+		names = append(names, proc.Name())
+		binaries = append(binaries, proc.Binary())
+	}
+	if got := strings.Join(names, ","); got != "S4_server,client_forward,client_inverted" {
+		t.Fatalf("names = %s", got)
+	}
+	if got := strings.Join(binaries, ","); got != "S4_server,S4_client,S4_client" {
+		t.Fatalf("binaries = %s", got)
+	}
+}
+
+func TestPolicyRejectsDuplicateProcessNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yml")
+	yaml := `name: S4_BC
+run:
+  multi_process:
+    enabled: true
+    executables:
+      - source_file: S4_client.c
+      - source_file: S4_client.c
+`
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := policy.Load(path); err == nil || !strings.Contains(err.Error(), "S4_client") {
+		t.Fatalf("want an error naming the duplicate process, got %v", err)
+	}
+}
+
+func loadPolicyYaml(t *testing.T, yaml string) *policy.Policy {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "policy.yml")
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

@@ -1,0 +1,27 @@
+name: S4 BC
+compile:
+  gcc: gcc
+  flags: ["-Wall"]
+run:
+  test_cases: []
+  multi_process:
+    enabled: true
+    executables:
+      - source_file: S4_server.c
+      - source_file: S4_client.c
+        name: client_forward
+      - source_file: S4_client.c
+        name: client_inverted
+    test_scenarios:
+      - name: two clients
+        process_args:
+          S4_server: ["5555"]
+          client_forward: ["127.0.0.1", "5555", "team_forward.txt"]
+          client_inverted: ["127.0.0.1", "5555", "team_inverted.txt"]
+        process_delays:
+          client_forward: 1000
+          client_inverted: 2000
+        expected_outputs:
+          S4_server: server.txt
+          client_forward: forward.txt
+          client_inverted: inverted.txt

@@ -27,6 +27,14 @@ func NewExecutor(p *policy.Policy, binaryDir string) *Executor {
 	return internalengine.NewExecutor(p, binaryDir)
 }
 
+// ScenarioHostArg is the argv[1] a sandboxed multi-process scenario re-execs this program with.
+const ScenarioHostArg = internalengine.ScenarioHostArg
+
+// RunScenarioHost serves that mode; call it from main when os.Args[1] == ScenarioHostArg.
+func RunScenarioHost() int {
+	return internalengine.RunScenarioHost()
+}
+
 // SubmissionFingerprint lets callers fingerprint once and share the result across similarity and AI detection.
 type SubmissionFingerprint = internalengine.SubmissionFingerprint
 

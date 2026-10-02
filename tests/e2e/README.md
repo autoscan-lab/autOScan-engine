@@ -22,6 +22,7 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
 | Test | Checks |
 |---|---|
 | `TestGradeProducesPassingResults` | a grade job downloads the policy and submissions and writes a passing `result.json` |
+| `TestScenarioProcessesTalkOverLoopback` | a multi-process scenario runs in one sandbox: a server reaches two named instances of one client over 127.0.0.1, each with its own args and expected output |
 | `TestTerminalGetsTheRunsOwnPolicyFiles` | a terminal gets the libraries and test files of its own run, not of the last graded assignment |
 | `TestSolutionTerminalBuildsFromThePolicy` | a solution terminal gets the assignment's solution, libraries, and test files, with the solution already built and runnable |
 | `TestSolutionTerminalThatFailsToCompileSaysWhy` | a solution that doesn't compile closes the terminal with the compile error as the reason |
@@ -38,11 +39,13 @@ bucket on every run, so it can run repeatedly against the same stack. Plain
   privileged so bubblewrap can sandbox, as on Fly.
 - `s3` (SeaweedFS) on `http://localhost:19000`, access key `local-access-key`,
   secret `local-secret-key` (see `s3.json`).
-- `testdata/bucket` is copied to the bucket root: `banned.yaml` and two
+- `testdata/bucket` is copied to the bucket root: `banned.yaml`, two
   assignments, `S2_BC` and `S2_AICE`, whose library and test file names differ
-  so a terminal shows which policy it got. Only `S2_BC` has a `solution/`.
+  so a terminal shows which policy it got (only `S2_BC` has a `solution/`), and
+  `S4_BC`, a multi-process server with two client instances.
 - `testdata/submissions/<name>` is zipped to `web/uploads/staging/<name>.zip`:
-  `fast` passes its test, `slow` sleeps so a grade stays busy for a few seconds.
+  `fast` passes its test, `slow` sleeps so a grade stays busy for a few seconds,
+  and `sockets` is the `S4_BC` server and client.
 
 ## Adding a scenario
 
