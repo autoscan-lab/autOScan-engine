@@ -13,14 +13,18 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/engine"
 	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
 )
 
-// The test binary doubles as the pane-host so the integration test exercises
+// The test binary doubles as the pane-host and scenario-host so tests exercise
 // the real re-exec path (the engine spawns os.Executable() the same way).
 func TestMain(m *testing.M) {
 	if len(os.Args) >= 3 && os.Args[1] == "pane-host" {
 		os.Exit(terminal.RunPaneHost(os.Args[2]))
+	}
+	if len(os.Args) == 2 && os.Args[1] == engine.ScenarioHostArg {
+		os.Exit(engine.RunScenarioHost())
 	}
 	os.Exit(m.Run())
 }

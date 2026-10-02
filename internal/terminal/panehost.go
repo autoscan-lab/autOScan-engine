@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	internalengine "github.com/autoscan-lab/autoscan-engine/internal/engine"
 )
 
 // ReadyLine is printed on stdout once the control socket is listening.
@@ -25,10 +27,10 @@ func RunPaneHost(ctlPath string) int {
 	log.SetFlags(0)
 
 	// Raise loopback, then drop ambient CAP_NET_ADMIN before any shell starts.
-	if err := raiseLoopback(); err != nil {
+	if err := internalengine.RaiseLoopback(); err != nil {
 		log.Printf("loopback: %v", err)
 	}
-	dropAmbientCaps()
+	internalengine.DropAmbientCaps()
 
 	_ = os.Remove(ctlPath)
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: ctlPath, Net: "unix"})

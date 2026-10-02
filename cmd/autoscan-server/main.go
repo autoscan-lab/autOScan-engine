@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/autoscan-lab/autoscan-engine/internal/terminal"
+	"github.com/autoscan-lab/autoscan-engine/pkg/engine"
 )
 
 const (
@@ -28,9 +29,12 @@ type httpError struct {
 func (e *httpError) Error() string { return e.msg }
 
 func main() {
-	// pane-host mode runs with no config or secrets — dispatch before loadConfig.
+	// Sandbox host modes run with no config or secrets — dispatch before loadConfig.
 	if len(os.Args) >= 3 && os.Args[1] == "pane-host" {
 		os.Exit(terminal.RunPaneHost(os.Args[2]))
+	}
+	if len(os.Args) == 2 && os.Args[1] == engine.ScenarioHostArg {
+		os.Exit(engine.RunScenarioHost())
 	}
 
 	cfg := loadConfig()

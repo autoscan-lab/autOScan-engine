@@ -51,6 +51,12 @@ docker compose -f tests/e2e/compose.yml down
 ```
 
 - Sandboxing and terminals need Linux. On macOS, use the Docker stack.
+- Execution tests skip without Valgrind. To run them sandboxed from macOS:
+  `docker run --rm --privileged -v "$PWD":/src -w /src golang:1.25-bookworm
+  sh -c 'apt-get update -qq && apt-get install -y -qq valgrind bubblewrap && go test ./tests/'`
+- Each multi-process scenario runs in one sandbox: the engine re-execs itself
+  as `scenario-host` (like `pane-host` for terminals), so its processes share
+  loopback, PIDs, and IPC.
 - A `GOOS=linux` cross-compile fails on cgo, so check Linux builds with the
   Docker build.
 - `tests/e2e/README.md` lists the scenarios and how to add one.

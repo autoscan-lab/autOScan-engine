@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -241,14 +240,30 @@ func (e *Executor) HasMultiProcess() bool {
 }
 
 func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath string, args []string) (*exec.Cmd, string, func(), *domain.ValgrindResult) {
+	cmdline, logPath, failure := valgrindCommand(binaryDir, binaryPath, args)
+	if failure != nil {
+		return nil, "", func() {}, failure
+	}
+
+	cleanup := func() {}
+	if sandboxAvailable() {
+		spec := sandboxSpec{workDir: binaryDir}
+		cmdline, cleanup = sandboxCommand(spec, cmdline)
+	}
+
+	return exec.CommandContext(ctx, cmdline[0], cmdline[1:]...), logPath, cleanup, nil
+}
+
+// valgrindCommand runs binaryPath under Memcheck, logging to a fresh file in binaryDir.
+func valgrindCommand(binaryDir, binaryPath string, args []string) ([]string, string, *domain.ValgrindResult) {
 	valgrindPath, err := exec.LookPath("valgrind")
 	if err != nil {
-		return nil, "", func() {}, domain.NewValgrindMissingResult("valgrind")
+		return nil, "", domain.NewValgrindMissingResult("valgrind")
 	}
 
 	logFile, err := os.CreateTemp(binaryDir, "valgrind-*.log")
 	if err != nil {
-		return nil, "", func() {}, domain.NewValgrindFailureResult(fmt.Sprintf("Could not create Valgrind log file: %v", err))
+		return nil, "", domain.NewValgrindFailureResult(fmt.Sprintf("Could not create Valgrind log file: %v", err))
 	}
 	logPath := logFile.Name()
 	_ = logFile.Close()
@@ -265,14 +280,7 @@ func (e *Executor) executionCommand(ctx context.Context, binaryDir, binaryPath s
 	}
 	valgrindArgs = append(valgrindArgs, args...)
 
-	cmdline := append([]string{valgrindPath}, valgrindArgs...)
-	cleanup := func() {}
-	if sandboxAvailable() {
-		spec := sandboxSpec{workDir: binaryDir}
-		cmdline, cleanup = sandboxCommand(spec, cmdline)
-	}
-
-	return exec.CommandContext(ctx, cmdline[0], cmdline[1:]...), logPath, cleanup, nil
+	return append([]string{valgrindPath}, valgrindArgs...), logPath, nil
 }
 
 func (e *Executor) valgrindResultFromLog(logPath string) *domain.ValgrindResult {
@@ -352,137 +360,119 @@ func (e *Executor) executeMultiProcessWithOverrides(ctx context.Context, sub dom
 		result.ScenarioName = scenario.Name
 	}
 	start := time.Now()
-	stageErr := e.stageTestFiles(e.GetSubmissionBinaryDir(sub))
+	binaryDir := e.GetSubmissionBinaryDir(sub)
+	stageErr := e.stageTestFiles(binaryDir)
 
-	var wg sync.WaitGroup
+	type launch struct {
+		proc    policy.ProcessConfig
+		result  *domain.ProcessResult
+		logPath string
+	}
+	var (
+		spec     scenarioSpec
+		launches []launch
+		maxDelay int
+	)
 
 	for _, proc := range config.Executables {
-		var args []string
-		var input string
-		delayMs := 0
-
-		if scenario != nil {
-			args = scenario.ProcessArgs[proc.Name()]
-			input = scenario.ProcessInputs[proc.Name()]
-			delayMs = scenario.ProcessDelays[proc.Name()]
-		}
-
+		name := proc.Name()
 		procResult := &domain.ProcessResult{
-			Name:       proc.Name(),
+			Name:       name,
 			SourceFile: proc.SourceFile,
 		}
-		result.AddProcess(proc.Name(), procResult)
+		result.AddProcess(name, procResult)
 		if stageErr != nil {
 			procResult.Stderr = stageErr.Error()
 			continue
 		}
 
-		wg.Add(1)
-		go func(proc policy.ProcessConfig, args []string, input string, delayMs int, procResult *domain.ProcessResult) {
-			defer wg.Done()
-			e.runOneProcess(ctx, sub, proc, args, input, delayMs, scenario, procResult)
-		}(proc, args, input, delayMs, procResult)
+		var args []string
+		var input string
+		delayMs := 0
+		if scenario != nil {
+			args = scenario.ProcessArgs[name]
+			input = scenario.ProcessInputs[name]
+			delayMs = scenario.ProcessDelays[name]
+		}
+
+		binaryPath := filepath.Join(binaryDir, proc.Binary())
+		if _, err := os.Stat(binaryPath); err != nil {
+			procResult.Stderr = fmt.Sprintf("Binary not found: %s (compilation may have failed)", binaryPath)
+			continue
+		}
+		argv, logPath, failure := valgrindCommand(binaryDir, binaryPath, args)
+		if failure != nil {
+			procResult.Stderr = failure.Message
+			procResult.Valgrind = failure
+			continue
+		}
+
+		spec.Processes = append(spec.Processes, scenarioProcess{
+			Argv:    argv,
+			Stdin:   unescapeInput(input),
+			DelayMs: delayMs,
+		})
+		launches = append(launches, launch{proc: proc, result: procResult, logPath: logPath})
+		maxDelay = max(maxDelay, delayMs)
 	}
 
-	wg.Wait()
+	if len(launches) > 0 {
+		// Each process gets the usual timeout after its own delay; the margin covers sandbox setup.
+		timeout := time.Duration(maxDelay)*time.Millisecond + DefaultExecTimeout + 5*time.Second
+		outcomes, timedOut, err := executeScenario(ctx, binaryDir, spec, timeout)
+
+		for index, l := range launches {
+			procResult := l.result
+			outcome, ok := outcomes[index]
+			if !ok {
+				procResult.Killed = true
+				procResult.TimedOut = timedOut
+				if err != nil {
+					procResult.Stderr = err.Error()
+				}
+				continue
+			}
+			e.applyOutcome(procResult, outcome, l.proc, scenario, l.logPath)
+		}
+	}
 
 	result.TotalDuration = time.Since(start)
 	computeMultiProcessStatus(result)
 	return result
 }
 
-func (e *Executor) runOneProcess(ctx context.Context, sub domain.Submission, proc policy.ProcessConfig, args []string, input string, delayMs int, scenario *policy.MultiProcessScenario, procResult *domain.ProcessResult) {
-	if delayMs > 0 {
-		select {
-		case <-time.After(time.Duration(delayMs) * time.Millisecond):
-		case <-ctx.Done():
-			procResult.Killed = true
-			return
-		}
+func (e *Executor) applyOutcome(procResult *domain.ProcessResult, outcome scenarioOutcome, proc policy.ProcessConfig, scenario *policy.MultiProcessScenario, logPath string) {
+	procResult.StartedAt = outcome.StartedAt
+	procResult.FinishedAt = outcome.FinishedAt
+	if !outcome.StartedAt.IsZero() && !outcome.FinishedAt.IsZero() {
+		procResult.Duration = outcome.FinishedAt.Sub(outcome.StartedAt)
 	}
+	procResult.Stdout = outcome.Stdout
+	procResult.Stderr = outcome.Stderr
+	procResult.TimedOut = outcome.TimedOut
+	procResult.Killed = outcome.Killed
+	procResult.CrashReason = outcome.CrashReason
+	procResult.Passed = !outcome.StartFailed && !procResult.Killed && procResult.CrashReason == ""
 
-	procResult.StartedAt = time.Now()
-	defer func() {
-		procResult.FinishedAt = time.Now()
-		procResult.Duration = procResult.FinishedAt.Sub(procResult.StartedAt)
-	}()
-
-	binaryDir := e.GetSubmissionBinaryDir(sub)
-	binaryPath := filepath.Join(binaryDir, strings.TrimSuffix(proc.SourceFile, ".c"))
-
-	if _, err := os.Stat(binaryPath); err != nil {
-		procResult.Stderr = fmt.Sprintf("Binary not found: %s (compilation may have failed)", binaryPath)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, DefaultExecTimeout)
-	defer cancel()
-
-	cmd, valgrindLogPath, cleanup, preflightFailure := e.executionCommand(ctx, binaryDir, binaryPath, args)
-	defer cleanup()
-	if preflightFailure != nil {
-		procResult.Stderr = preflightFailure.Message
-		procResult.Valgrind = preflightFailure
-		return
-	}
-	configureProcessGroup(cmd)
-	cmd.Cancel = func() error { return killProcessGroup(cmd) }
-	cmd.Dir = binaryDir
-	cmd.Env = MinimalEnv(binaryDir)
-	if input != "" {
-		cmd.Stdin = strings.NewReader(unescapeInput(input))
-	}
-
-	stdout := &cappedBuffer{limit: maxCapturedOutput}
-	stderr := &cappedBuffer{limit: maxCapturedOutput}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-
-	err := cmd.Run()
-
-	procResult.Stdout = stdout.String()
-	procResult.Stderr = stderr.String()
-
-	if ctx.Err() == context.Canceled {
-		procResult.Killed = true
-	}
-	if ctx.Err() == context.DeadlineExceeded {
-		procResult.TimedOut = true
-		procResult.Killed = true
-	}
-
-	runOK := true
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
-			runOK = false
-			if procResult.Stderr == "" {
-				procResult.Stderr = err.Error()
-			}
-		}
-	}
-
-	procResult.CrashReason = crashReasonFromExit(err, procResult.TimedOut)
-	procResult.Passed = runOK && !procResult.Killed && procResult.CrashReason == ""
-
-	if scenario != nil && scenario.ExpectedOutputs != nil {
-		if expectedFile, ok := scenario.ExpectedOutputs[proc.Name()]; ok && expectedFile != "" {
+	procResult.OutputMatch = domain.OutputMatchNone
+	if scenario != nil {
+		if expectedFile := scenario.ExpectedOutputs[proc.Name()]; expectedFile != "" {
 			expectedPath := filepath.Join(e.expectedOutputsDir, expectedFile)
 			if expectedData, err := os.ReadFile(expectedPath); err == nil {
 				procResult.OutputMatch, procResult.OutputDiff = domain.ComputeOutputDiff(string(expectedData), procResult.Stdout)
 			} else {
 				procResult.OutputMatch = domain.OutputMatchMissing
 			}
-		} else {
-			procResult.OutputMatch = domain.OutputMatchNone
 		}
-	} else {
-		procResult.OutputMatch = domain.OutputMatchNone
 	}
 	if procResult.OutputMatch == domain.OutputMatchFail || procResult.OutputMatch == domain.OutputMatchMissing {
 		procResult.Passed = false
 	}
 
-	procResult.Valgrind = e.valgrindResultFromLog(valgrindLogPath)
+	if outcome.StartedAt.IsZero() {
+		return
+	}
+	procResult.Valgrind = e.valgrindResultFromLog(logPath)
 	if procResult.Valgrind != nil && procResult.Valgrind.Fails() {
 		procResult.Passed = false
 	}

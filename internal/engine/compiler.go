@@ -306,7 +306,12 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 	allOK := true
 	timedOut := false
 
+	built := make(map[string]bool, len(mp.Executables))
 	for _, proc := range mp.Executables {
+		if built[proc.SourceFile] {
+			continue
+		}
+		built[proc.SourceFile] = true
 		sourceFile := filepath.Join(sub.Path, proc.SourceFile)
 
 		if _, err := os.Stat(sourceFile); err != nil {
@@ -315,8 +320,7 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 			continue
 		}
 
-		binaryName := strings.TrimSuffix(proc.SourceFile, ".c")
-		outputPath := filepath.Join(outputDir, binaryName)
+		outputPath := filepath.Join(outputDir, proc.Binary())
 
 		run := e.compileExecutable(ctx, sub, outputDir, []string{sourceFile}, libraryFiles, libDir, outputPath)
 		if run.timedOut {
@@ -327,11 +331,11 @@ func (e *CompileEngine) compileMultiProcess(ctx context.Context, sub domain.Subm
 		allCmds = append(allCmds, ";")
 
 		if run.stdout != "" {
-			allStdout.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name()))
+			allStdout.WriteString(fmt.Sprintf("=== %s ===\n", filepath.Base(proc.Binary())))
 			allStdout.WriteString(run.stdout)
 		}
 		if run.stderr != "" {
-			allStderr.WriteString(fmt.Sprintf("=== %s ===\n", proc.Name()))
+			allStderr.WriteString(fmt.Sprintf("=== %s ===\n", filepath.Base(proc.Binary())))
 			allStderr.WriteString(run.stderr)
 		}
 

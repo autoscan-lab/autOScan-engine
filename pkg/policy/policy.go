@@ -38,11 +38,21 @@ type MultiProcessConfig struct {
 
 type ProcessConfig struct {
 	SourceFile string `yaml:"source_file"`
+	// InstanceName tells apart several processes built from one source file.
+	InstanceName string `yaml:"name,omitempty"`
 }
 
-// Name is the source file's stem ("S4_client.c" -> "S4_client").
+// Name keys the process in scenarios and results: its instance name, or the source file's stem ("S4_client.c" -> "S4_client").
 func (p ProcessConfig) Name() string {
+	if name := strings.TrimSpace(p.InstanceName); name != "" {
+		return name
+	}
 	return strings.TrimSuffix(filepath.Base(p.SourceFile), ".c")
+}
+
+// Binary is the compiled program's path relative to the submission's build dir; instances of one source share it.
+func (p ProcessConfig) Binary() string {
+	return strings.TrimSuffix(p.SourceFile, ".c")
 }
 
 type MultiProcessScenario struct {
@@ -79,7 +89,25 @@ func Load(path string) (*Policy, error) {
 	if p.Compile.GCC == "" {
 		p.Compile.GCC = "gcc"
 	}
+	if err := p.Run.MultiProcess.validate(); err != nil {
+		return nil, err
+	}
 	return &p, nil
+}
+
+func (m *MultiProcessConfig) validate() error {
+	if m == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(m.Executables))
+	for _, proc := range m.Executables {
+		name := proc.Name()
+		if seen[name] {
+			return fmt.Errorf("policy: two processes are named %q; give each instance of a source file its own name", name)
+		}
+		seen[name] = true
+	}
+	return nil
 }
 
 func LoadWithGlobalsFromConfigDir(path, configDir string) (*Policy, error) {

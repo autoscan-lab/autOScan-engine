@@ -1,11 +1,11 @@
 //go:build linux
 
-package terminal
+package engine
 
 import "golang.org/x/sys/unix"
 
 // Needs the ambient CAP_NET_ADMIN the engine grants via bwrap --cap-add; a no-op where lo is already up.
-func raiseLoopback() error {
+func RaiseLoopback() error {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
 	if err != nil {
 		return err
@@ -27,6 +27,6 @@ func raiseLoopback() error {
 	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifreq)
 }
 
-func dropAmbientCaps() {
+func DropAmbientCaps() {
 	_ = unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0)
 }

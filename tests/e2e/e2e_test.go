@@ -83,6 +83,48 @@ func TestGradeProducesPassingResults(t *testing.T) {
 	}
 }
 
+// The server waits for both clients, two instances of one source with their own args, over 127.0.0.1.
+func TestScenarioProcessesTalkOverLoopback(t *testing.T) {
+	run := gradeDone(t, "S4_BC", "sockets")
+
+	var result struct {
+		Results []struct {
+			MultiProcess []struct {
+				Order     []string `json:"order"`
+				AllPassed bool     `json:"all_passed"`
+				Processes map[string]struct {
+					SourceFile  string `json:"source_file"`
+					Stdout      string `json:"stdout"`
+					Stderr      string `json:"stderr"`
+					OutputMatch string `json:"output_match"`
+				} `json:"processes"`
+			} `json:"multi_process"`
+		} `json:"results"`
+	}
+	readJSON(t, "web/runs/"+run+"/result.json", &result)
+	if len(result.Results) != 1 || len(result.Results[0].MultiProcess) != 1 {
+		t.Fatalf("want one submission with one scenario, got %+v", result)
+	}
+
+	scenario := result.Results[0].MultiProcess[0]
+	if got := strings.Join(scenario.Order, ","); got != "S4_server,client_forward,client_inverted" {
+		t.Errorf("order = %s", got)
+	}
+	for name, source := range map[string]string{
+		"S4_server":       "S4_server.c",
+		"client_forward":  "S4_client.c",
+		"client_inverted": "S4_client.c",
+	} {
+		proc := scenario.Processes[name]
+		if proc.SourceFile != source || proc.OutputMatch != "pass" {
+			t.Errorf("%s: source %q, output %q\nstdout=%q\nstderr=%q", name, proc.SourceFile, proc.OutputMatch, proc.Stdout, proc.Stderr)
+		}
+	}
+	if !scenario.AllPassed {
+		t.Error("scenario did not pass")
+	}
+}
+
 // Regression: a terminal used to get the files of whichever assignment was graded last.
 func TestTerminalGetsTheRunsOwnPolicyFiles(t *testing.T) {
 	bc := gradeDone(t, "S2_BC", "fast")
@@ -514,7 +556,7 @@ func seed(ctx context.Context) error {
 		return err
 	}
 
-	for _, name := range []string{"fast", "slow"} {
+	for _, name := range []string{"fast", "slow", "sockets"} {
 		data, err := zipDir(filepath.Join("testdata", "submissions", name))
 		if err != nil {
 			return err

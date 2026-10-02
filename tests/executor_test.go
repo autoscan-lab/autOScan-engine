@@ -124,7 +124,7 @@ func TestNoScenarioRunsBare(t *testing.T) {
 
 func TestScenarioDelayStaggersProcessStart(t *testing.T) {
 	requireTool(t, "gcc")
-	// No valgrind needed: StartedAt is stamped before the execution preflight.
+	requireTool(t, "valgrind")
 
 	sub := writeSubmission(t, filepath.Join(t.TempDir(), "student"), map[string]string{
 		"first.c":  trivialSource,
@@ -144,6 +144,119 @@ func TestScenarioDelayStaggersProcessStart(t *testing.T) {
 	gap := result.Processes["second"].StartedAt.Sub(result.Processes["first"].StartedAt)
 	if gap < 200*time.Millisecond {
 		t.Fatalf("expected second to start ~300ms after first, gap was %v", gap)
+	}
+}
+
+func TestInstancesOfOneSourceRunWithTheirOwnArgs(t *testing.T) {
+	requireTool(t, "gcc")
+	requireTool(t, "valgrind")
+
+	sub := writeSubmission(t, filepath.Join(t.TempDir(), "student"), map[string]string{
+		"printer.c": printerSource,
+	})
+	p := executorPolicy(t.TempDir())
+	p.Run.MultiProcess.Executables = []policy.ProcessConfig{
+		{SourceFile: "printer.c", InstanceName: "forward"},
+		{SourceFile: "printer.c", InstanceName: "inverted"},
+	}
+	executor := compileAndExecutor(t, p, sub)
+
+	scenario := policy.MultiProcessScenario{
+		Name: "Both",
+		ProcessArgs: map[string][]string{
+			"forward":  {"team_forward.txt"},
+			"inverted": {"team_inverted.txt"},
+		},
+	}
+	result := executor.ExecuteMultiProcessScenario(context.Background(), sub, scenario)
+	if result == nil {
+		t.Fatal("expected a result")
+	}
+
+	if got := strings.Join(result.Order, ","); got != "forward,inverted" {
+		t.Fatalf("order = %q, want forward,inverted", got)
+	}
+	for name, want := range map[string]string{
+		"forward":  "arg:team_forward.txt\n",
+		"inverted": "arg:team_inverted.txt\n",
+	} {
+		proc := result.Processes[name]
+		if proc == nil || proc.Stdout != want || proc.SourceFile != "printer.c" {
+			t.Errorf("%s = %+v, want stdout %q from printer.c", name, proc, want)
+		}
+	}
+}
+
+// Accepts one connection on 127.0.0.1:argv[1] and prints what it reads.
+const tcpServerSource = `#include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+	int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+	struct sockaddr_in addr = {0};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(atoi(argv[1]));
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	if (bind(fd, (struct sockaddr *)&addr, sizeof addr) < 0 || listen(fd, 1) < 0) { perror("listen"); return 1; }
+	int c = accept(fd, NULL, NULL);
+	char buf[64] = {0};
+	ssize_t n = read(c, buf, sizeof buf - 1);
+	printf("got:%.*s\n", (int)(n > 0 ? n : 0), buf);
+	close(c);
+	close(fd);
+	return 0;
+}
+`
+
+// Connects to 127.0.0.1:argv[1] and sends argv[2].
+const tcpClientSource = `#include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in addr = {0};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(atoi(argv[1]));
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof addr) < 0) { perror("connect"); return 1; }
+	write(fd, argv[2], strlen(argv[2]));
+	close(fd);
+	return 0;
+}
+`
+
+func TestScenarioProcessesShareLoopback(t *testing.T) {
+	requireTool(t, "gcc")
+	requireTool(t, "valgrind")
+
+	sub := writeSubmission(t, filepath.Join(t.TempDir(), "student"), map[string]string{
+		"server.c": tcpServerSource,
+		"client.c": tcpClientSource,
+	})
+	executor := compileAndExecutor(t, executorPolicy(t.TempDir(), "server.c", "client.c"), sub)
+
+	scenario := policy.MultiProcessScenario{
+		Name:          "Connect",
+		ProcessArgs:   map[string][]string{"server": {"5701"}, "client": {"5701", "hello"}},
+		ProcessDelays: map[string]int{"client": 1000},
+	}
+	result := executor.ExecuteMultiProcessScenario(context.Background(), sub, scenario)
+	if result == nil {
+		t.Fatal("expected a result")
+	}
+
+	if got := result.Processes["server"].Stdout; got != "got:hello\n" {
+		t.Fatalf("server stdout = %q, stderr = %q; client stderr = %q",
+			got, result.Processes["server"].Stderr, result.Processes["client"].Stderr)
+	}
+	if !result.Processes["client"].Passed {
+		t.Fatalf("client failed: %+v", result.Processes["client"])
 	}
 }
 
