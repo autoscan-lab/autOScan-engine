@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/autoscan-lab/autoscan-engine/internal/callback"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
@@ -41,6 +42,11 @@ func (s *server) gradeAsync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	exportPrefix := strings.TrimSpace(r.FormValue("export_key_prefix"))
+	callbackURL := strings.TrimSpace(r.FormValue("callback_url"))
+	if callbackURL != "" && !callback.Valid(callbackURL) {
+		writeError(w, &httpError{status: 400, msg: "invalid 'callback_url' field"})
+		return
+	}
 
 	runID, err := newRunID()
 	if err != nil {
@@ -52,15 +58,17 @@ func (s *server) gradeAsync(w http.ResponseWriter, r *http.Request) {
 	s.jobs.Store(runID, cancel)
 	s.activity.begin()
 	s.progress.set(runID, 0.01, "Queued")
-	go s.runGradeJob(ctx, cancel, runID, assignment, r2Key, exportPrefix, resultPrefix)
+	go s.runGradeJob(ctx, cancel, runID, assignment, r2Key, exportPrefix, resultPrefix, callbackURL)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID})
 }
 
-func (s *server) runGradeJob(ctx context.Context, cancel context.CancelFunc, runID, assignment, r2Key, exportPrefix, resultPrefix string) {
+func (s *server) runGradeJob(ctx context.Context, cancel context.CancelFunc, runID, assignment, r2Key, exportPrefix, resultPrefix, callbackURL string) {
 	defer s.activity.end()
 	defer s.jobs.Delete(runID)
 	defer cancel()
+	// Runs after the progress is final, and while the job still counts as activity.
+	defer s.notifySettled(callbackURL, runID)
 
 	if err := s.executeGradeJob(ctx, runID, assignment, r2Key, exportPrefix, resultPrefix); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -73,6 +81,19 @@ func (s *server) runGradeJob(ctx context.Context, cancel context.CancelFunc, run
 		return
 	}
 	s.progress.finish(runID, true, "")
+}
+
+// Lets the caller settle the run without anyone polling for it.
+func (s *server) notifySettled(callbackURL, runID string) {
+	if callbackURL == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	notifier := callback.Notifier{Client: &http.Client{Timeout: 10 * time.Second}, Secret: s.cfg.engineSecret, Delays: callback.DefaultDelays}
+	if err := notifier.Notify(ctx, callbackURL, runID); err != nil {
+		log.Printf("async grade run_id=%s callback failed: %v", runID, err)
+	}
 }
 
 func (s *server) cancelGrade(w http.ResponseWriter, r *http.Request) {
