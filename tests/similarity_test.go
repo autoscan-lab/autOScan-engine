@@ -199,9 +199,7 @@ func TestSimilarityIgnoresRepeatedBoilerplate(t *testing.T) {
 	}
 }
 
-func TestAIDetectionScoresContainmentOfEntries(t *testing.T) {
-	dict := &aipkg.Dictionary{Entries: []aipkg.Entry{
-		{ID: "sum", Title: "Positive sum", Code: `int add_positive(int *xs, int from, int to) {
+const aiSumEntry = `int add_positive(int *xs, int from, int to) {
     int s = 0;
     for (int j = from; j < to; j++) {
         if (xs[j] > 0) {
@@ -209,27 +207,73 @@ func TestAIDetectionScoresContainmentOfEntries(t *testing.T) {
         }
     }
     return s;
-}`},
-		{ID: "swap16", Title: "Manual swap", Code: `unsigned short swap16(unsigned short x) {
-    return (unsigned short)((x << 8) | (x >> 8));
-}`},
-	}}
+}`
 
-	subs := writeSubmissions(t, map[string]string{"original": similarityOriginal})
+func aiDetect(t *testing.T, dict *aipkg.Dictionary, sources map[string]string) map[string]domain.AISubmissionResult {
+	t.Helper()
+	subs := writeSubmissions(t, sources)
 	prints := engine.FingerprintSubmissions(subs, "lab.c", similarityConfig)
 	report, err := engine.ComputeAIDetectionFromFingerprints(subs, prints, "lab.c", dict, similarityConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if report.DictionaryUsable != 2 || len(report.DictionaryErrors) != 0 {
+	if report.DictionaryUsable != len(dict.Entries) || len(report.DictionaryErrors) != 0 {
 		t.Fatalf("short entries should be usable, got usable=%d errors=%+v", report.DictionaryUsable, report.DictionaryErrors)
 	}
-	sub := report.Submissions[0]
-	if sub.BestScore < 0.99 || !sub.Flagged {
-		t.Fatalf("embedded entry scored %.2f (flagged=%v), want ~1", sub.BestScore, sub.Flagged)
+	out := map[string]domain.AISubmissionResult{}
+	for _, sub := range report.Submissions {
+		out[sub.SubmissionID] = sub
 	}
-	if sub.Matches[0].EntryID != "sum" || len(sub.Matches[0].Spans) == 0 {
-		t.Fatalf("unexpected top match: %+v", sub.Matches[0])
+	return out
+}
+
+func TestAIDetectionScoresShareOfCodeMadeOfPatterns(t *testing.T) {
+	dict := &aipkg.Dictionary{Entries: []aipkg.Entry{
+		{ID: "sum", Title: "Positive sum", Code: aiSumEntry},
+		{ID: "swap16", Title: "Manual swap", Code: `unsigned short swap16(unsigned short x) {
+    return (unsigned short)((x << 8) | (x >> 8));
+}`},
+	}}
+	results := aiDetect(t, dict, map[string]string{
+		"embedded": similarityOriginal,
+		"only":     aiSumEntry,
+	})
+
+	// The sum helper is a minority of this program, so the score is its share of the code.
+	embedded := results["embedded"]
+	if embedded.Score < 0.15 || embedded.Score > 0.5 {
+		t.Fatalf("embedded pattern scored %.2f, want its share of the file", embedded.Score)
+	}
+	if len(embedded.Matches) != 1 || embedded.Matches[0].EntryID != "sum" || embedded.Matches[0].Score < 0.99 || len(embedded.Matches[0].Spans) == 0 {
+		t.Fatalf("want one full match of the sum pattern, got %+v", embedded.Matches)
+	}
+
+	if only := results["only"]; only.Score < 0.99 || !only.Flagged {
+		t.Fatalf("a file that is the pattern scored %.2f (flagged=%v), want ~1", only.Score, only.Flagged)
+	}
+}
+
+func TestAIDetectionIgnoresPatternFragments(t *testing.T) {
+	// Only the sum helper of this two-function pattern appears, under half of it.
+	dict := &aipkg.Dictionary{Entries: []aipkg.Entry{{ID: "pair", Title: "Sum and report", Code: aiSumEntry + `
+
+void report_totals(int *xs, int n, int threshold) {
+    int above = 0;
+    int below = 0;
+    for (int k = 0; k < n; k++) {
+        if (xs[k] > threshold) {
+            above++;
+        } else {
+            below++;
+        }
+    }
+    printf("above=%d below=%d\n", above, below);
+    if (above > below) {
+        printf("mostly above\n");
+    }
+}`}}}
+	results := aiDetect(t, dict, map[string]string{"embedded": similarityOriginal})
+	if got := results["embedded"]; got.Score != 0 || len(got.Matches) != 0 {
+		t.Fatalf("a fragment of a pattern scored %.2f with %d matches, want 0", got.Score, len(got.Matches))
 	}
 }

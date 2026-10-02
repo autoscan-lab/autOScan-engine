@@ -8,6 +8,13 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
+const (
+	// A pattern counts once at least half of it appears; a two-line idiom alone is not the pattern.
+	aiPatternMinShare = 0.5
+	// Flag a submission when this share of its code is dictionary patterns.
+	aiFlagShare = 0.25
+)
+
 type dictionaryFingerprint struct {
 	entry aipkg.Entry
 	fp    domain.FileFingerprint
@@ -44,16 +51,10 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 		}
 		fp := prints[i].FP
 
-		matches := compareSubmissionToDictionary(fp, dictFPs, cfg)
-		bestScore := 0.0
-		flagged := false
-		for _, m := range matches {
-			if m.Score > bestScore {
-				bestScore = m.Score
-			}
-			if m.Flagged {
-				flagged = true
-			}
+		matches, covered := compareSubmissionToDictionary(fp, dictFPs, cfg)
+		score := 0.0
+		if fp.TokenCount > 0 {
+			score = float64(covered) / float64(fp.TokenCount)
 		}
 
 		results[i] = domain.AISubmissionResult{
@@ -61,8 +62,8 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 			SourceFile:    srcFile,
 			FunctionCount: fp.FunctionCount,
 			MatchCount:    len(matches),
-			BestScore:     bestScore,
-			Flagged:       flagged,
+			Score:         score,
+			Flagged:       score >= aiFlagShare,
 			Matches:       matches,
 		}
 	})
@@ -71,8 +72,8 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 		if results[i].Flagged != results[j].Flagged {
 			return results[i].Flagged
 		}
-		if results[i].BestScore != results[j].BestScore {
-			return results[i].BestScore > results[j].BestScore
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
 		}
 		return results[i].SubmissionID < results[j].SubmissionID
 	})
@@ -116,39 +117,45 @@ func fingerprintDictionary(dict *aipkg.Dictionary, cfg domain.CompareConfig) ([]
 	return items, errs
 }
 
-func compareSubmissionToDictionary(subFP domain.FileFingerprint, dictFPs []dictionaryFingerprint, cfg domain.CompareConfig) []domain.AIDictionaryMatch {
+// Returns the patterns substantially present and how many of the submission's tokens they cover.
+func compareSubmissionToDictionary(subFP domain.FileFingerprint, dictFPs []dictionaryFingerprint, cfg domain.CompareConfig) ([]domain.AIDictionaryMatch, int) {
 	matches := make([]domain.AIDictionaryMatch, 0, len(dictFPs))
+	covered := make([]bool, len(subFP.Tokens))
 
 	for _, d := range dictFPs {
 		tiles := greedyStringTiling(subFP.Tokens, d.fp.Tokens, cfg.MinMatchTokens)
-		if len(tiles) == 0 {
+		share := float64(tiledTokens(tiles)) / float64(d.fp.TokenCount)
+		if share < aiPatternMinShare {
 			continue
 		}
-		// Containment: how much of the entry appears in the submission.
-		score := float64(tiledTokens(tiles)) / float64(d.fp.TokenCount)
 
 		spans := make([]domain.Span, 0, len(tiles))
 		for _, t := range tiles {
 			spans = append(spans, tileSpan(subFP, t.a, t.length))
+			for k := t.a; k < t.a+t.length; k++ {
+				covered[k] = true
+			}
 		}
 		matches = append(matches, domain.AIDictionaryMatch{
 			EntryID: d.entry.ID,
 			Title:   d.entry.Title,
-			Score:   score,
-			Flagged: score >= cfg.ScoreThreshold,
+			Score:   share,
 			Spans:   convertSpans(subFP, spans),
 		})
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Flagged != matches[j].Flagged {
-			return matches[i].Flagged
-		}
 		if matches[i].Score != matches[j].Score {
 			return matches[i].Score > matches[j].Score
 		}
 		return matches[i].EntryID < matches[j].EntryID
 	})
 
-	return matches
+	count := 0
+	for _, c := range covered {
+		if c {
+			count++
+		}
+	}
+	return matches, count
 }

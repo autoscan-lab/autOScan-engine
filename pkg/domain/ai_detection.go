@@ -6,22 +6,23 @@ type AIDictionaryEntryError struct {
 }
 
 type AIDictionaryMatch struct {
-	EntryID string      `json:"entry_id"`
-	Title   string      `json:"title"`
-	Score   float64     `json:"score"`
-	Flagged bool        `json:"flagged"`
-	Spans   []MatchSpan `json:"spans,omitempty"`
+	EntryID string `json:"entry_id"`
+	Title   string `json:"title"`
+	// Share of the pattern found in the submission.
+	Score float64     `json:"score"`
+	Spans []MatchSpan `json:"spans,omitempty"`
 }
 
 type AISubmissionResult struct {
-	SubmissionID  string              `json:"id"`
-	SourceFile    string              `json:"source_file,omitempty"`
-	FunctionCount int                 `json:"function_count"`
-	MatchCount    int                 `json:"match_count,omitempty"`
-	BestScore     float64             `json:"best_score"`
-	Flagged       bool                `json:"flagged"`
-	ParseError    string              `json:"parse_error,omitempty"`
-	Matches       []AIDictionaryMatch `json:"matches,omitempty"`
+	SubmissionID  string `json:"id"`
+	SourceFile    string `json:"source_file,omitempty"`
+	FunctionCount int    `json:"function_count"`
+	MatchCount    int    `json:"match_count,omitempty"`
+	// Share of the submission's code made of dictionary patterns; the key predates that meaning.
+	Score      float64             `json:"best_score"`
+	Flagged    bool                `json:"flagged"`
+	ParseError string              `json:"parse_error,omitempty"`
+	Matches    []AIDictionaryMatch `json:"matches,omitempty"`
 }
 
 type AIDetectionReport struct {
