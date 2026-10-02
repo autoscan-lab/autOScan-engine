@@ -1,11 +1,15 @@
 # Deploy autOScan-engine
 
+The additive AI evidence contract and engine-first rollout are documented in
+[AI_DETECTION.md](AI_DETECTION.md). The dictionary is optional for style and
+provenance analysis.
+
 ## 1. R2 bucket layout
 
 ```
 your-bucket-name/
   banned.yaml             # global, applied to every assignment
-  ai_dictionary.yaml      # global, optional — required only for AI-detection
+  ai_dictionary.yaml      # global, optional — without it AI detection skips dictionary patterns
   assignments/
     <assignment-name>/    # one folder per assignment; the whole prefix is synced
       policy.yml
@@ -70,9 +74,28 @@ starts it again on the next request. Leave the variable unset locally to never e
   whenever the pane's foreground job changes. The PIDs are as the sandbox's
   shells see them, and the list is empty at the prompt.
 
+Grade and sandbox AI submissions expose optional `ai_score` (0–100 heuristic,
+method version, named point contributions), alongside `style`, `tells`,
+`token_metrics`, and `similar_to_flagged`. `best_score` remains dictionary
+coverage. Style features include bounded named-file source ranges and the
+full occurrence count; contributions reference them with `feature_key`.
+Other contributions carry their own ranges. Tells can include `end_line`.
+Missing overall scores indicate insufficient evidence, not zero. The review
+rules and scoring floors are documented in [AI_DETECTION.md](AI_DETECTION.md).
+
 Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
 the volume and keeps it with the run's workspace, so a run's terminal always gets
 the libraries and test files it was graded with. Runs are never deleted by age:
 only once the volume passes 90% full are the oldest removed (never the newest). The terminal token
 also carries the assignment name, which the engine uses to fetch a run's config
 when it has none.
+
+### Global banned-code constructs
+
+`banned.yaml` accepts a `constructs` mapping with `variable_length_arrays`,
+`initialized_arrays`, and `pthread_attributes` booleans alongside the existing
+`banned` function list. Each defaults to true when omitted; false disables that
+scanner rule. Hits retain the existing function/file/line/column/snippet JSON
+shape, with a construct label in `function`. See [AI_DETECTION.md](AI_DETECTION.md)
+for recognition boundaries and the independent AI review rules. Deploy the
+engine before the app's construct-policy controls; old run results remain valid.

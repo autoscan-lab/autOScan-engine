@@ -14,14 +14,16 @@ import (
 )
 
 type ScanEngine struct {
-	bannedSet map[string]struct{}
-	lang      *sitter.Language
+	bannedSet  map[string]struct{}
+	lang       *sitter.Language
+	constructs policy.BannedConstructs
 }
 
 func NewScanEngine(p *policy.Policy) *ScanEngine {
 	return &ScanEngine{
-		bannedSet: p.BannedSet(),
-		lang:      c.GetLanguage(),
+		bannedSet:  p.BannedSet(),
+		lang:       c.GetLanguage(),
+		constructs: p.BannedConstructs,
 	}
 }
 
@@ -54,6 +56,7 @@ func (e *ScanEngine) ScanAll(submissions []domain.Submission) []domain.ScanResul
 			defer wg.Done()
 			// One parser per worker; tree-sitter parsers are not thread-safe.
 			parser := sitter.NewParser()
+			defer parser.Close()
 			parser.SetLanguage(e.lang)
 
 			for idx := range jobs {
@@ -103,6 +106,18 @@ func (e *ScanEngine) scanFileWithParser(parser *sitter.Parser, filePath, display
 	var hits []domain.BannedHit
 	lines := strings.Split(string(content), "\n")
 	e.walkTree(tree.RootNode(), content, lines, displayName, &hits)
+	for _, pattern := range declarationPatterns(tree.RootNode(), content) {
+		if (pattern.kind == "variable_length_array" && !e.constructs.BanVariableLengthArrays()) ||
+			(pattern.kind == "initialized_array" && !e.constructs.BanInitializedArrays()) {
+			continue
+		}
+		row := int(pattern.node.StartPoint().Row)
+		snippet := strings.TrimSpace(lines[row])
+		if len([]rune(snippet)) > 160 {
+			snippet = string([]rune(snippet)[:159]) + "…"
+		}
+		hits = append(hits, domain.NewBannedHit(pattern.label, displayName, row+1, int(pattern.node.StartPoint().Column)+1, snippet))
+	}
 
 	return hits, nil
 }
@@ -114,6 +129,10 @@ func (e *ScanEngine) walkTree(node *sitter.Node, content []byte, lines []string,
 
 	if node.Type() == "call_expression" {
 		e.checkCallExpression(node, content, lines, fileName, hits)
+	}
+	if e.constructs.BanPthreadAttributes() && node.Type() == "type_identifier" && node.Content(content) == "pthread_attr_t" && !insideMacro(node) {
+		row := int(node.StartPoint().Row)
+		*hits = append(*hits, domain.NewBannedHit("pthread_attr_t", fileName, row+1, int(node.StartPoint().Column)+1, strings.TrimSpace(lines[row])))
 	}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -152,7 +171,8 @@ func (e *ScanEngine) checkCallExpression(node *sitter.Node, content []byte, line
 		return
 	}
 
-	if _, banned := e.bannedSet[funcName]; banned {
+	_, banned := e.bannedSet[funcName]
+	if banned || (e.constructs.BanPthreadAttributes() && strings.HasPrefix(funcName, "pthread_attr_") && !insideMacro(node)) {
 		line := int(funcNode.StartPoint().Row) + 1
 		col := int(funcNode.StartPoint().Column) + 1
 

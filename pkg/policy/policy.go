@@ -10,13 +10,35 @@ import (
 )
 
 type Policy struct {
-	Name            string        `yaml:"name"`
-	Compile         CompileConfig `yaml:"compile"`
-	Run             RunConfig     `yaml:"run"`
-	LibraryFiles    []string      `yaml:"library_files"` // .c/.o/.h files from ~/.config/autoscan/libraries/
-	TestFiles       []string      `yaml:"test_files,omitempty"`
-	ConfigDir       string        `yaml:"-"` // Directory for banned.yaml, libraries, test files, expected outputs
-	BannedFunctions []string      `yaml:"-"` // Loaded from global banned.yaml
+	Name             string           `yaml:"name"`
+	Compile          CompileConfig    `yaml:"compile"`
+	Run              RunConfig        `yaml:"run"`
+	LibraryFiles     []string         `yaml:"library_files"` // .c/.o/.h files from ~/.config/autoscan/libraries/
+	TestFiles        []string         `yaml:"test_files,omitempty"`
+	ConfigDir        string           `yaml:"-"` // Directory for banned.yaml, libraries, test files, expected outputs
+	BannedFunctions  []string         `yaml:"-"` // Loaded from global banned.yaml
+	BannedConstructs BannedConstructs `yaml:"-"`
+}
+
+type BannedConstructs struct {
+	VariableLengthArrays *bool `yaml:"variable_length_arrays"`
+	InitializedArrays    *bool `yaml:"initialized_arrays"`
+	PthreadAttributes    *bool `yaml:"pthread_attributes"`
+}
+
+func (b BannedConstructs) BanVariableLengthArrays() bool {
+	return b.VariableLengthArrays == nil || *b.VariableLengthArrays
+}
+func (b BannedConstructs) BanInitializedArrays() bool {
+	return b.InitializedArrays == nil || *b.InitializedArrays
+}
+func (b BannedConstructs) BanPthreadAttributes() bool {
+	return b.PthreadAttributes == nil || *b.PthreadAttributes
+}
+
+type GlobalBannedPolicy struct {
+	Banned     []string         `yaml:"banned"`
+	Constructs BannedConstructs `yaml:"constructs"`
 }
 
 type CompileConfig struct {
@@ -121,12 +143,13 @@ func LoadWithGlobalsFromConfigDir(path, configDir string) (*Policy, error) {
 	}
 
 	bannedFile := filepath.Join(p.EffectiveConfigDir(), "banned.yaml")
-	bannedFuncs, err := LoadGlobalBanned(bannedFile)
+	banned, err := LoadGlobalBannedPolicy(bannedFile)
 	if err != nil {
 		return nil, err
 	}
 
-	p.BannedFunctions = bannedFuncs
+	p.BannedFunctions = banned.Banned
+	p.BannedConstructs = banned.Constructs
 	return p, nil
 }
 
@@ -186,20 +209,23 @@ func (p *Policy) BuildGCCArgs(sourceFiles []string, libraryFiles []string, outpu
 }
 
 func LoadGlobalBanned(path string) ([]string, error) {
+	config, err := LoadGlobalBannedPolicy(path)
+	return config.Banned, err
+}
+
+func LoadGlobalBannedPolicy(path string) (GlobalBannedPolicy, error) {
+	var bannedConfig GlobalBannedPolicy
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return bannedConfig, nil
 		}
-		return nil, err
+		return bannedConfig, err
 	}
 
-	var bannedConfig struct {
-		Banned []string `yaml:"banned"`
-	}
 	if err := yaml.Unmarshal(data, &bannedConfig); err != nil {
-		return nil, fmt.Errorf("parsing banned.yaml: %w", err)
+		return bannedConfig, fmt.Errorf("parsing banned.yaml: %w", err)
 	}
 
-	return bannedConfig.Banned, nil
+	return bannedConfig, nil
 }

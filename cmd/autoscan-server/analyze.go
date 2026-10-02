@@ -45,7 +45,6 @@ func runAnalysis(configDir, sourceFile string, submissions []domain.Submission, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing similarity: %w", err)
 		}
-		trimSimilarityReport(&result, opts.SimilarityIncludeSpans, opts.SimilarityMinScore)
 		sim = &result
 	}
 
@@ -58,10 +57,12 @@ func runAnalysis(configDir, sourceFile string, submissions []domain.Submission, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing ai detection: %w", err)
 		}
-		trimAIDetectionReport(&result, opts.AIDetectionIncludeSpans, opts.AIDetectionMinScore)
 		ai = &result
 	}
 
+	engine.LinkSimilarToFlagged(ai, sim)
+	trimSimilarityReport(sim, opts.SimilarityIncludeSpans, opts.SimilarityMinScore)
+	trimAIDetectionReport(ai, opts.AIDetectionIncludeSpans, opts.AIDetectionMinScore)
 	return sim, ai, nil
 }
 
@@ -116,7 +117,7 @@ func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, 
 	if minScore > 0 {
 		filtered := report.Submissions[:0]
 		for _, submission := range report.Submissions {
-			if submission.Score*100 >= minScore {
+			if submission.Score*100 >= minScore || submission.Flagged {
 				filtered = append(filtered, submission)
 			}
 		}
@@ -132,11 +133,12 @@ func trimAIDetectionReport(report *domain.AIDetectionReport, includeSpans bool, 
 	}
 }
 
+// A missing dictionary disables pattern matching only; style signals and tells still run.
 func loadAIDictionary(configDir string) (*aipkg.Dictionary, error) {
 	path := filepath.Join(configDir, "ai_dictionary.yaml")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, &httpError{status: 503, msg: "no ai_dictionary.yaml in R2"}
+			return nil, nil
 		}
 		return nil, err
 	}

@@ -38,8 +38,15 @@ service setup, deployment, environment variables, and HTTP API details, see
 - Banned function scanning with file/line/column/snippet evidence
 - Similarity analysis via Greedy String Tiling over normalized C tokens
 - AI-pattern detection: the share of a submission's code made of dictionary patterns
+- AI style signals: comment, error-handling and idiom features plus formatting and naming entropy, scored against fixed anchors rather than the class
+- Overall AI review score: one versioned 0–100 heuristic with named point contributions and clickable source ranges; not an authorship probability
+- AI evidence: tool configuration files, pasted assistant wording, and contextual typography
+- Local token entropy and held-out peer perplexity, with no remote model calls
 - Policy parsing and validation helpers
 - Public Go facade package (`pkg/engine`) for autOScan apps/tools
+
+[AI detection](AI_DETECTION.md) explains the signals, formulas, abstention rules,
+and validation limits. Review scores are not authorship probabilities.
 
 ---
 
