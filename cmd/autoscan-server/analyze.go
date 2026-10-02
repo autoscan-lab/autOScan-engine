@@ -41,7 +41,7 @@ func runAnalysis(configDir, sourceFile string, submissions []domain.Submission, 
 	prints := engine.FingerprintSubmissions(submissions, sourceFile, defaultCompareConfig)
 
 	if opts.IncludeSimilarity {
-		result, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sourceFile, defaultCompareConfig)
+		result, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sourceFile, defaultCompareConfig, solutionFingerprint(configDir, sourceFile))
 		if err != nil {
 			return nil, nil, fmt.Errorf("computing similarity: %w", err)
 		}
@@ -65,6 +65,15 @@ func runAnalysis(configDir, sourceFile string, submissions []domain.Submission, 
 	return sim, ai, nil
 }
 
+// The assignment's reference solution (solution/<source_file>), or nil when it has none.
+func solutionFingerprint(configDir, sourceFile string) *domain.FileFingerprint {
+	fp, err := engine.FingerprintFile(filepath.Join(configDir, "solution", sourceFile), defaultCompareConfig)
+	if err != nil || fp.TokenCount == 0 {
+		return nil
+	}
+	return &fp
+}
+
 func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, minScore float64) {
 	if report == nil {
 		return
@@ -77,12 +86,26 @@ func trimSimilarityReport(report *domain.SimilarityReport, includeSpans bool, mi
 			}
 		}
 		report.Pairs = filtered
+		if report.Solution != nil {
+			solutionPairs := report.Solution.Pairs[:0]
+			for _, pair := range report.Solution.Pairs {
+				if pair.SimilarityPercent >= minScore {
+					solutionPairs = append(solutionPairs, pair)
+				}
+			}
+			report.Solution.Pairs = solutionPairs
+		}
 	}
 	if includeSpans {
 		return
 	}
 	for index := range report.Pairs {
 		report.Pairs[index].Matches = nil
+	}
+	if report.Solution != nil {
+		for index := range report.Solution.Pairs {
+			report.Solution.Pairs[index].Matches = nil
+		}
 	}
 }
 

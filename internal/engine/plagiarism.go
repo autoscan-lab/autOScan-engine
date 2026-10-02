@@ -57,7 +57,8 @@ func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg
 	return prints
 }
 
-func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
+// solution is the assignment's reference solution, or nil when it has none.
+func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig, solution *domain.FileFingerprint) (domain.SimilarityReport, error) {
 	report := domain.SimilarityReport{SourceFile: srcFile}
 
 	type fingerprintItem struct {
@@ -73,6 +74,21 @@ func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints [
 		} else {
 			failures++
 		}
+	}
+
+	if solution != nil && solution.TokenCount > 0 {
+		report.Solution = &domain.SolutionReport{Source: string(solution.Content), Pairs: make([]domain.SolutionPairResult, len(fps))}
+		parallelForEach(len(fps), func(i int) {
+			id := submissions[fps[i].idx].ID
+			report.Solution.Pairs[i] = domain.SolutionPairResult{
+				ID:               id,
+				PlagiarismResult: CompareFiles(filepath.Base(id), "solution", fps[i].fp, *solution, cfg),
+			}
+			fps[i].fp = withoutSolutionCode(fps[i].fp, *solution, cfg.MinMatchTokens)
+		})
+		sort.Slice(report.Solution.Pairs, func(i, j int) bool {
+			return report.Solution.Pairs[i].SimilarityPercent > report.Solution.Pairs[j].SimilarityPercent
+		})
 	}
 
 	if len(fps) < 2 {
@@ -115,4 +131,18 @@ func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints [
 
 	report.Pairs = pairs
 	return report, nil
+}
+
+// Code that also appears in the reference solution is what the assignment leads everyone to
+// write, so between submissions it neither matches nor counts.
+func withoutSolutionCode(fp, solution domain.FileFingerprint, minMatch int) domain.FileFingerprint {
+	tokens := append([]uint64(nil), fp.Tokens...)
+	for _, t := range greedyStringTiling(fp.Tokens, solution.Tokens, minMatch) {
+		for k := t.a; k < t.a+t.length; k++ {
+			tokens[k] = 0
+		}
+		fp.TokenCount -= t.length
+	}
+	fp.Tokens = tokens
+	return fp
 }
