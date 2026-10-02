@@ -1,5 +1,8 @@
 package domain
 
+// Bump this when saved reports need recomputing, including token-model changes.
+const AIDetectionMethod = "contextual-v2"
+
 type AIDictionaryEntryError struct {
 	EntryID string `json:"entry_id"`
 	Err     string `json:"error"`
@@ -36,6 +39,8 @@ type AIStyleFeature struct {
 	Detail        string             `json:"detail"`
 	Locations     []AISourceEvidence `json:"locations,omitempty"`
 	LocationCount int                `json:"location_count"`
+	SampleCount   int                `json:"sample_count,omitempty"`
+	Reliability   float64            `json:"reliability,omitempty"`
 }
 
 type AISourceEvidence struct {
@@ -47,12 +52,13 @@ type AISourceEvidence struct {
 }
 
 type AIScoreContribution struct {
-	Key        string             `json:"key"`
-	FeatureKey string             `json:"feature_key,omitempty"`
-	Label      string             `json:"label"`
-	Points     float64            `json:"points"`
-	Detail     string             `json:"detail"`
-	Locations  []AISourceEvidence `json:"locations,omitempty"`
+	Key           string             `json:"key"`
+	FeatureKey    string             `json:"feature_key,omitempty"`
+	Label         string             `json:"label"`
+	Points        float64            `json:"points"`
+	Detail        string             `json:"detail"`
+	Locations     []AISourceEvidence `json:"locations,omitempty"`
+	LocationCount int                `json:"location_count,omitempty"`
 }
 
 type AIScoreReport struct {
@@ -66,19 +72,61 @@ type AIStyleReport struct {
 	// Uncalibrated review score, not an authorship probability.
 	Score float64 `json:"score"`
 	// Share of the run's submissions with a lower score.
-	Percentile float64          `json:"percentile"`
-	CohortSize int              `json:"cohort_size"`
-	Flagged    bool             `json:"flagged"`
-	Features   []AIStyleFeature `json:"features"`
+	Percentile  float64              `json:"percentile"`
+	CohortSize  int                  `json:"cohort_size"`
+	Flagged     bool                 `json:"flagged"`
+	Features    []AIStyleFeature     `json:"features"`
+	SourceStats *AISourceStats       `json:"source_stats,omitempty"`
+	Formatting  []AIFormattingChoice `json:"formatting,omitempty"`
+}
+
+type AISourceStats struct {
+	TokenCount    int            `json:"token_count"`
+	CodeLines     int            `json:"code_lines"`
+	Calls         int            `json:"calls"`
+	Conditions    int            `json:"conditions"`
+	Arrays        int            `json:"arrays"`
+	PatternCounts map[string]int `json:"pattern_counts,omitempty"`
+}
+
+type AIFormattingChoice struct {
+	Key           string  `json:"key"`
+	Label         string  `json:"label"`
+	SampleCount   int     `json:"sample_count"`
+	Dominant      string  `json:"dominant"`
+	DominantCount int     `json:"dominant_count"`
+	Entropy       float64 `json:"entropy"`
+}
+
+type AITokenWindow struct {
+	File                string  `json:"file"`
+	StartLine           int     `json:"start_line"`
+	EndLine             int     `json:"end_line"`
+	TokenCount          int     `json:"token_count"`
+	CrossEntropyBits    float64 `json:"cross_entropy_bits"`
+	Perplexity          float64 `json:"perplexity"`
+	EntropyBits         float64 `json:"entropy_bits"`
+	SurprisalStddevBits float64 `json:"surprisal_stddev_bits"`
 }
 
 type AITokenMetrics struct {
-	TokenCount          int      `json:"token_count"`
-	EntropyBits         float64  `json:"entropy_bits"`
-	CohortSize          int      `json:"cohort_size"`
-	CrossEntropyBits    *float64 `json:"cross_entropy_bits,omitempty"`
-	Perplexity          *float64 `json:"perplexity,omitempty"`
-	SurprisalStddevBits *float64 `json:"surprisal_stddev_bits,omitempty"`
+	TokenCount                 int             `json:"token_count"`
+	EntropyBits                float64         `json:"entropy_bits"`
+	CohortSize                 int             `json:"cohort_size"`
+	CrossEntropyBits           *float64        `json:"cross_entropy_bits,omitempty"`
+	Perplexity                 *float64        `json:"perplexity,omitempty"`
+	SurprisalStddevBits        *float64        `json:"surprisal_stddev_bits,omitempty"`
+	Method                     string          `json:"method,omitempty"`
+	ExcludedPeers              int             `json:"excluded_peers,omitempty"`
+	NormalizedEntropyBits      *float64        `json:"normalized_entropy_bits,omitempty"`
+	NormalizedCrossEntropyBits *float64        `json:"normalized_cross_entropy_bits,omitempty"`
+	NormalizedPerplexity       *float64        `json:"normalized_perplexity,omitempty"`
+	UnknownTokenShare          *float64        `json:"unknown_token_share,omitempty"`
+	WindowStddevBits           *float64        `json:"window_stddev_bits,omitempty"`
+	WindowBurstiness           *float64        `json:"window_burstiness,omitempty"`
+	AdjacentWindowChangeBits   *float64        `json:"adjacent_window_change_bits,omitempty"`
+	WindowCount                int             `json:"window_count,omitempty"`
+	Windows                    []AITokenWindow `json:"windows,omitempty"`
 }
 
 // AISimilarLink points at a submission flagged on its own evidence that this one closely resembles.
@@ -107,6 +155,7 @@ type AISubmissionResult struct {
 }
 
 type AIDetectionReport struct {
+	Method               string                   `json:"method"`
 	SourceFile           string                   `json:"source_file"`
 	DictionaryEntryCount int                      `json:"dictionary_entry_count"`
 	DictionaryUsable     int                      `json:"dictionary_usable"`

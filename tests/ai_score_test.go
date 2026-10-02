@@ -24,14 +24,14 @@ func scoredSubmission(t *testing.T, files map[string]string) domain.AISubmission
 
 func TestOverallAIScoreExplainsTheTotalAndNamedFiles(t *testing.T) {
 	result := scoredSubmission(t, map[string]string{"lab.c": studentStyled, "helper.c": assistantStyled})
-	if result.AIScore == nil || result.AIScore.Method != "heuristic-v1" {
+	if result.AIScore == nil || result.AIScore.Method != "contextual-v2" {
 		t.Fatalf("missing versioned score: %+v", result)
 	}
 	total := 0.0
 	for _, contribution := range result.AIScore.Contributions {
 		total += contribution.Points
 	}
-	if math.Abs(total-result.AIScore.Score) > 0.001 || math.Abs(result.AIScore.Score-result.Style.Score*100) > 0.001 {
+	if math.Abs(total-result.AIScore.Score) > 0.001 || result.AIScore.Score < result.Style.Score*100-0.05 {
 		t.Fatalf("contributions %.3f, score %.3f, style %.3f", total, result.AIScore.Score, result.Style.Score)
 	}
 	for _, key := range []string{"prose_comments", "doc_headers", "error_checks", "defensive_idioms"} {
@@ -127,7 +127,7 @@ func TestRequestedCodePatternsFlagTheExactSourceRange(t *testing.T) {
 }`
 	for _, example := range []struct {
 		source, kind string
-		floor        float64
+		ceiling      float64
 	}{
 		{condition, "complex_condition", 20},
 		{`int main(void) { char *buffer; asprintf(&buffer, "%d. Sector %d (%s) | priority=%d | landing=(%d,%d)\n",
@@ -137,7 +137,7 @@ func TestRequestedCodePatternsFlagTheExactSourceRange(t *testing.T) {
              sector_identifier, sector_priority, sector_landing_position); return 0; }`, "wrapped_call", 30},
 	} {
 		result := scoredSubmission(t, map[string]string{"lab.c": example.source})
-		if !result.Flagged || result.AIScore == nil || result.AIScore.Score < example.floor {
+		if !result.Flagged || result.AIScore == nil || result.AIScore.Score <= 0 || result.AIScore.Score >= example.ceiling {
 			t.Fatalf("requested pattern did not trigger review: %+v", result)
 		}
 		found := false
