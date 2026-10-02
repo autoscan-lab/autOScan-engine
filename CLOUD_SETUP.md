@@ -64,7 +64,11 @@ starts it again on the next request. Leave the variable unset locally to never e
   submission (`run_id`, `submission_id`) or, with `solution: true`, an
   assignment whose `solution/` files are copied in with its libraries and test
   files and compiled before the shell opens. A solution that doesn't compile
-  closes the socket with the compile error as the reason.
+  closes the socket with the compile error as the reason. Binary frames carry
+  terminal I/O. The client sends `{"type":"resize","cols","rows"}` text frames,
+  and the engine sends `{"type":"processes","processes":[{"pid","name"}]}`
+  whenever the pane's foreground job changes. The PIDs are as the sandbox's
+  shells see them, and the list is empty at the prompt.
 
 Each grade run downloads its assignment from R2 into `runs/<run_id>/config` on
 the volume and keeps it with the run's workspace, so a run's terminal always gets
