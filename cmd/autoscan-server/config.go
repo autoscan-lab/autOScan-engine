@@ -23,7 +23,8 @@ type config struct {
 	r2SecretKey  string
 	r2BucketName string
 	// Overrides the R2 endpoint, e.g. http://s3:8333 for the local SeaweedFS store.
-	r2Endpoint string
+	r2Endpoint     string
+	aiResultPrefix string
 }
 
 func loadConfig() config {
@@ -38,17 +39,26 @@ func loadConfig() config {
 	}
 
 	idleExit, _ := time.ParseDuration(strings.TrimSpace(os.Getenv("AUTOSCAN_IDLE_EXIT")))
+	aiPrefix := strings.Trim(strings.TrimSpace(os.Getenv("R2_APP_PREFIX")), "/")
+	if aiPrefix == "" {
+		aiPrefix = "web"
+	}
+	aiResultPrefix := strings.Trim(strings.TrimSpace(os.Getenv("AUTOSCAN_AI_RESULT_PREFIX")), "/")
+	if aiResultPrefix == "" {
+		aiResultPrefix = aiPrefix + "/runs"
+	}
 
 	return config{
-		dataDir:      dataDir,
-		port:         port,
-		engineSecret: os.Getenv("ENGINE_SECRET"),
-		idleExit:     idleExit,
-		r2AccountID:  os.Getenv("R2_ACCOUNT_ID"),
-		r2AccessKey:  os.Getenv("R2_ACCESS_KEY_ID"),
-		r2SecretKey:  os.Getenv("R2_SECRET_ACCESS_KEY"),
-		r2BucketName: os.Getenv("R2_BUCKET_NAME"),
-		r2Endpoint:   strings.TrimSpace(os.Getenv("R2_ENDPOINT")),
+		dataDir:        dataDir,
+		port:           port,
+		engineSecret:   os.Getenv("ENGINE_SECRET"),
+		idleExit:       idleExit,
+		r2AccountID:    os.Getenv("R2_ACCOUNT_ID"),
+		r2AccessKey:    os.Getenv("R2_ACCESS_KEY_ID"),
+		r2SecretKey:    os.Getenv("R2_SECRET_ACCESS_KEY"),
+		r2BucketName:   os.Getenv("R2_BUCKET_NAME"),
+		r2Endpoint:     strings.TrimSpace(os.Getenv("R2_ENDPOINT")),
+		aiResultPrefix: aiResultPrefix,
 	}
 }
 

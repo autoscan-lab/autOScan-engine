@@ -23,6 +23,7 @@ type dictionaryFingerprint struct {
 // A missing or unusable dictionary only disables pattern matching; style and tells still run.
 func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
 	report := domain.AIDetectionReport{
+		Method:     domain.AIDetectionMethod,
 		SourceFile: srcFile,
 	}
 	if len(prints) != len(submissions) {
@@ -39,7 +40,7 @@ func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints 
 	}
 
 	results := make([]domain.AISubmissionResult, len(submissions))
-	tokens := make([][][]string, len(submissions))
+	tokens := make([][][]metricToken, len(submissions))
 	parallelForEach(len(submissions), func(i int) {
 		sub := submissions[i]
 		style, tells, sourceTokens := analyzeSubmissionStyle(sub)

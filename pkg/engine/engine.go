@@ -1,11 +1,17 @@
 package engine
 
 import (
+	"context"
 	internalengine "github.com/autoscan-lab/autoscan-engine/internal/engine"
 	aipkg "github.com/autoscan-lab/autoscan-engine/pkg/ai"
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 	"github.com/autoscan-lab/autoscan-engine/pkg/policy"
 )
+
+// ReanalyzeSavedAIDetection refreshes only AI analysis, preserving grading and dictionary matches.
+func ReanalyzeSavedAIDetection(ctx context.Context, payload []byte, cfg domain.CompareConfig) ([]byte, bool, error) {
+	return internalengine.ReanalyzeSavedAIDetection(ctx, payload, cfg)
+}
 
 type CompileOption = internalengine.CompileOption
 
