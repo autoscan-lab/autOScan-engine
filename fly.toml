@@ -40,5 +40,5 @@ primary_region = 'ams'
 
 # Performance CPUs are never throttled; shared ones ran out of burst credit mid-grade.
 [[vm]]
-  size = 'performance-1x'
-  memory = '2gb'
+  size = 'performance-2x'
+  memory = '4gb'
