@@ -14,6 +14,9 @@ type Runner = internalengine.Runner
 type RunnerCallbacks = internalengine.RunnerCallbacks
 
 type Executor = internalengine.Executor
+type ScanEngine = internalengine.ScanEngine
+
+func NewScanEngine(p *policy.Policy) *ScanEngine { return internalengine.NewScanEngine(p) }
 
 func WithOutputDir(dir string) CompileOption {
 	return internalengine.WithOutputDir(dir)
@@ -52,4 +55,12 @@ func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints [
 
 func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {
 	return internalengine.ComputeAIDetectionFromFingerprints(submissions, prints, srcFile, dict, cfg)
+}
+
+func LinkSimilarToFlagged(report *domain.AIDetectionReport, similarity *domain.SimilarityReport) {
+	internalengine.LinkSimilarToFlagged(report, similarity)
+}
+
+func AnalyzeSubmissionStyle(sub domain.Submission) (*domain.AIStyleReport, []domain.AITell) {
+	return internalengine.AnalyzeSubmissionStyle(sub)
 }

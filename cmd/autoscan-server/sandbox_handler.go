@@ -131,6 +131,7 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trimAIDetectionReport(&ai, true, 0)
+	engine.LinkSimilarToFlagged(&ai, &sim)
 
 	log.Printf("processed sandbox analyze with %d submissions", len(submissions))
 	writeJSON(w, http.StatusOK, sandboxAnalyzeResponse{
@@ -151,7 +152,7 @@ func sandboxAIDictionary(ctx context.Context, cfg config, workDir string) (*aipk
 		return nil, err
 	}
 	if !ok {
-		return nil, &httpError{status: 503, msg: "no ai_dictionary.yaml in R2; add patterns under Policies → AI dictionary"}
+		return nil, nil
 	}
 	return aipkg.LoadDictionary(dictPath)
 }
