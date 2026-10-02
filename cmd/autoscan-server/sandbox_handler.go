@@ -117,7 +117,7 @@ func (s *server) sandboxAnalyze(w http.ResponseWriter, r *http.Request) {
 	prints := engine.FingerprintSubmissions(submissions, sandboxSourceFile, defaultCompareConfig)
 
 	progress.report(0.55, "Computing similarity")
-	sim, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sandboxSourceFile, defaultCompareConfig)
+	sim, err := engine.ComputeSimilarityFromFingerprints(submissions, prints, sandboxSourceFile, defaultCompareConfig, nil)
 	if err != nil {
 		writeError(w, &httpError{status: 500, msg: "computing similarity: " + err.Error()})
 		return

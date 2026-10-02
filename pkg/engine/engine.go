@@ -34,8 +34,12 @@ func FingerprintSubmissions(submissions []domain.Submission, srcFile string, cfg
 	return internalengine.FingerprintSubmissions(submissions, srcFile, cfg)
 }
 
-func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig) (domain.SimilarityReport, error) {
-	return internalengine.ComputeSimilarityFromFingerprints(submissions, prints, srcFile, cfg)
+func FingerprintFile(path string, cfg domain.CompareConfig) (domain.FileFingerprint, error) {
+	return internalengine.FingerprintFile(path, cfg)
+}
+
+func ComputeSimilarityFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, cfg domain.CompareConfig, solution *domain.FileFingerprint) (domain.SimilarityReport, error) {
+	return internalengine.ComputeSimilarityFromFingerprints(submissions, prints, srcFile, cfg, solution)
 }
 
 func ComputeAIDetectionFromFingerprints(submissions []domain.Submission, prints []SubmissionFingerprint, srcFile string, dict *aipkg.Dictionary, cfg domain.CompareConfig) (domain.AIDetectionReport, error) {

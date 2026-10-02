@@ -46,6 +46,19 @@ type PlagiarismResult struct {
 type SimilarityReport struct {
 	SourceFile string                 `json:"source_file"`
 	Pairs      []SimilarityPairResult `json:"pairs"`
+	// Set when the assignment has a reference solution; its code is set aside in Pairs.
+	Solution *SolutionReport `json:"solution,omitempty"`
+}
+
+type SolutionReport struct {
+	Source string `json:"source"`
+	// Each submission against the solution itself, so copying it still shows.
+	Pairs []SolutionPairResult `json:"pairs"`
+}
+
+type SolutionPairResult struct {
+	ID string `json:"id"`
+	PlagiarismResult
 }
 
 type SimilarityPairResult struct {

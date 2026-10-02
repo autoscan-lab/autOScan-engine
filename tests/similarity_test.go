@@ -140,7 +140,7 @@ func similarityScores(t *testing.T, sources map[string]string) map[[2]string]dom
 	t.Helper()
 	subs := writeSubmissions(t, sources)
 	prints := engine.FingerprintSubmissions(subs, "lab.c", similarityConfig)
-	report, err := engine.ComputeSimilarityFromFingerprints(subs, prints, "lab.c", similarityConfig)
+	report, err := engine.ComputeSimilarityFromFingerprints(subs, prints, "lab.c", similarityConfig, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,5 +364,70 @@ func TestSimilarityDoesNotMatchHeadersAgainstDeclarations(t *testing.T) {
 	scores := similarityScores(t, map[string]string{"header": header, "declarations": declarations})
 	if pair := scores[[2]string{"header", "declarations"}]; len(pair.Matches) != 0 {
 		t.Fatalf("header matched declarations: %.1f%% with %d tiles", pair.SimilarityPercent, len(pair.Matches))
+	}
+}
+
+func TestSimilaritySetsAsideReferenceSolutionCode(t *testing.T) {
+	extraA := `
+int count_even(int *values, int n) {
+    int even = 0;
+    for (int i = 0; i < n; i++) {
+        if (values[i] % 2 == 0) {
+            even++;
+        }
+    }
+    return even;
+}
+`
+	extraB := `
+double average(double *samples, int count) {
+    double sum = 0.0;
+    int k = 0;
+    while (k < count) {
+        sum += samples[k];
+        k++;
+    }
+    return count > 0 ? sum / count : 0.0;
+}
+`
+	subs := writeSubmissions(t, map[string]string{
+		"first":  similarityOriginal + extraA,
+		"second": similarityRenamed + extraB,
+	})
+	solutionPath := filepath.Join(t.TempDir(), "lab.c")
+	if err := os.WriteFile(solutionPath, []byte(similarityOriginal), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	solution, err := engine.FingerprintFile(solutionPath, similarityConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prints := engine.FingerprintSubmissions(subs, "lab.c", similarityConfig)
+
+	without, err := engine.ComputeSimilarityFromFingerprints(subs, prints, "lab.c", similarityConfig, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, err := engine.ComputeSimilarityFromFingerprints(subs, prints, "lab.c", similarityConfig, &solution)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both submissions are mostly the solution: alike without it, unrelated once it is set aside.
+	if without.Pairs[0].SimilarityPercent < 60 {
+		t.Fatalf("without the solution the pair scored %.1f%%, want >= 60%%", without.Pairs[0].SimilarityPercent)
+	}
+	if got := with.Pairs[0].SimilarityPercent; got > 15 {
+		t.Fatalf("with the solution set aside the pair scored %.1f%%, want <= 15%%", got)
+	}
+
+	// Copying the solution still shows, against the solution itself.
+	if with.Solution == nil || len(with.Solution.Pairs) != 2 || with.Solution.Source != similarityOriginal {
+		t.Fatalf("want the solution source and one row per submission, got %+v", with.Solution)
+	}
+	for _, pair := range with.Solution.Pairs {
+		if pair.SimilarityPercent < 60 || !pair.Flagged || len(pair.Matches) == 0 {
+			t.Fatalf("%s vs solution scored %.1f%% (flagged=%v), want a flagged match", pair.ID, pair.SimilarityPercent, pair.Flagged)
+		}
 	}
 }
