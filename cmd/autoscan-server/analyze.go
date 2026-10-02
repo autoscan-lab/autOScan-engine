@@ -14,7 +14,7 @@ import (
 var defaultCompareConfig = domain.CompareConfig{
 	MinMatchTokens: 12,
 	MinFuncTokens:  20,
-	ScoreThreshold: 0.7,
+	ScoreThreshold: 0.6,
 }
 
 type analysisOptions struct {
