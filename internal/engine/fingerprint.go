@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"hash/fnv"
 	"sort"
 	"strings"
@@ -36,12 +35,16 @@ func fingerprintContent(content []byte, minFuncTokens int) (domain.FileFingerpri
 		LineOffsets: buildLineOffsets(content),
 	}
 
+	root := tree.RootNode()
+	declared := make(map[string]bool)
+	collectDeclaredNames(root, content, declared)
+
 	var funcs []*sitter.Node
-	collectFunctionDefs(tree.RootNode(), &funcs)
+	collectFunctionDefs(root, &funcs)
 
 	for _, fn := range funcs {
 		var tokens []token
-		normalizeTokens(fn, content, make(map[string]int), &tokens)
+		normalizeTokens(fn, content, declared, &tokens)
 		if len(tokens) < minFuncTokens {
 			continue
 		}
@@ -81,7 +84,31 @@ func collectFunctionDefs(node *sitter.Node, out *[]*sitter.Node) {
 	}
 }
 
-func normalizeTokens(node *sitter.Node, content []byte, idMap map[string]int, tokens *[]token) {
+// Parents whose identifier child names something this file declares.
+var declaringParents = map[string]bool{
+	"init_declarator": true, "function_declarator": true, "pointer_declarator": true,
+	"array_declarator": true, "parenthesized_declarator": true, "parameter_declaration": true,
+	"declaration": true, "field_declaration": true, "type_definition": true, "enumerator": true,
+	"struct_specifier": true, "union_specifier": true, "enum_specifier": true,
+}
+
+func collectDeclaredNames(node *sitter.Node, content []byte, declared map[string]bool) {
+	switch node.Type() {
+	case "preproc_def", "preproc_function_def":
+		if name := node.ChildByFieldName("name"); name != nil {
+			declared[name.Content(content)] = true
+		}
+	case "identifier", "field_identifier", "type_identifier":
+		if parent := node.Parent(); parent != nil && declaringParents[parent.Type()] {
+			declared[node.Content(content)] = true
+		}
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		collectDeclaredNames(node.Child(i), content, declared)
+	}
+}
+
+func normalizeTokens(node *sitter.Node, content []byte, declared map[string]bool, tokens *[]token) {
 	if node == nil {
 		return
 	}
@@ -98,11 +125,11 @@ func normalizeTokens(node *sitter.Node, content []byte, idMap map[string]int, to
 	default:
 		if node.ChildCount() > 0 {
 			for i := 0; i < int(node.ChildCount()); i++ {
-				normalizeTokens(node.Child(i), content, idMap, tokens)
+				normalizeTokens(node.Child(i), content, declared, tokens)
 			}
 			return
 		}
-		text = normalizeToken(node, content, idMap)
+		text = normalizeToken(node, content, declared)
 	}
 
 	if text != "" {
@@ -110,7 +137,7 @@ func normalizeTokens(node *sitter.Node, content []byte, idMap map[string]int, to
 	}
 }
 
-func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int) string {
+func normalizeToken(node *sitter.Node, content []byte, declared map[string]bool) string {
 	raw := strings.TrimSpace(node.Content(content))
 	if raw == "" {
 		return ""
@@ -121,13 +148,12 @@ func normalizeToken(node *sitter.Node, content []byte, idMap map[string]int) str
 	}
 
 	switch node.Type() {
+	// The file's own names are interchangeable; library names (fork, wait, SIGINT) carry meaning.
 	case "identifier", "field_identifier", "type_identifier":
-		id, ok := idMap[raw]
-		if !ok {
-			id = len(idMap) + 1
-			idMap[raw] = id
+		if declared[raw] {
+			return "@ID"
 		}
-		return fmt.Sprintf("@%d", id)
+		return raw
 	case "number_literal":
 		return "@NUM"
 	default:
@@ -231,7 +257,7 @@ func tileSpan(fp domain.FileFingerprint, start, length int) domain.Span {
 
 func isPunctuation(raw string) bool {
 	switch raw {
-	case "(", ")", "{", "}", "[", "]", ";", ",", ".":
+	case "(", ")", "{", "}", "[", "]", ";", ",", ".", "->":
 		return true
 	default:
 		return false
@@ -254,6 +280,8 @@ func normalizeOperator(raw string) (string, bool) {
 		return "@BIT", true
 	case "?", ":":
 		return "@TERNARY", true
+	case "for", "while", "do":
+		return "@LOOP", true
 	default:
 		return "", false
 	}

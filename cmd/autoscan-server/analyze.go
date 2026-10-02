@@ -12,7 +12,7 @@ import (
 )
 
 var defaultCompareConfig = domain.CompareConfig{
-	MinMatchTokens: 9,
+	MinMatchTokens: 12,
 	MinFuncTokens:  20,
 	ScoreThreshold: 0.7,
 }

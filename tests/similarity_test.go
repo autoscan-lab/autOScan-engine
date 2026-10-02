@@ -10,7 +10,7 @@ import (
 	"github.com/autoscan-lab/autoscan-engine/pkg/domain"
 )
 
-var similarityConfig = domain.CompareConfig{MinMatchTokens: 9, MinFuncTokens: 20, ScoreThreshold: 0.7}
+var similarityConfig = domain.CompareConfig{MinMatchTokens: 12, MinFuncTokens: 20, ScoreThreshold: 0.7}
 
 const similarityOriginal = `#include <stdio.h>
 #include <unistd.h>
@@ -231,5 +231,66 @@ func TestAIDetectionScoresContainmentOfEntries(t *testing.T) {
 	}
 	if sub.Matches[0].EntryID != "sum" || len(sub.Matches[0].Spans) == 0 {
 		t.Fatalf("unexpected top match: %+v", sub.Matches[0])
+	}
+}
+
+// Moving declarations or adding a statement first used to renumber every later name.
+func TestSimilaritySurvivesMovedDeclarations(t *testing.T) {
+	inline := `int happens(int p);
+void print_line(const char *s);
+int pick_level(int parent);
+int pick_rarity(void);
+void announce(int level, int rarity);
+int launch(int level, int count);
+
+int explore(int parent) {
+    srand(getpid());
+    if (happens(5)) {
+        print_line("ruined");
+        return 0;
+    }
+    int level = pick_level(parent);
+    int rarity = pick_rarity();
+    announce(level, rarity);
+    if (level == 3 && happens(1)) {
+        print_line("life");
+    }
+    if (level == 3 || level == 4) {
+        return 0;
+    }
+    return launch(level, rarity + 1);
+}
+`
+	hoisted := `int ocurre(int p);
+void escribir(const char *s);
+int elegir_nivel(int padre);
+int elegir_rareza(void);
+void anunciar(int nivel, int rareza);
+int lanzar(int nivel, int cuantos);
+
+int explorar(int padre) {
+    int nivel;
+    int rareza;
+    int hijos;
+    if (ocurre(5)) {
+        escribir("arruinado");
+        return 0;
+    }
+    nivel = elegir_nivel(padre);
+    rareza = elegir_rareza();
+    anunciar(nivel, rareza);
+    if (nivel == 3 && ocurre(1)) {
+        escribir("vida");
+    }
+    if (nivel == 3 || nivel == 4) {
+        return 0;
+    }
+    hijos = rareza + 1;
+    return lanzar(nivel, hijos);
+}
+`
+	scores := similarityScores(t, map[string]string{"inline": inline, "hoisted": hoisted})
+	if pair := scores[[2]string{"inline", "hoisted"}]; pair.SimilarityPercent < 40 {
+		t.Fatalf("reordered declarations scored %.1f%%, want >= 40%%", pair.SimilarityPercent)
 	}
 }
