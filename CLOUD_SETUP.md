@@ -72,7 +72,7 @@ expire within 60 seconds; reopening or refreshing a run reads its latest report.
 
 ```bash
 # One-time: provisions the persistent disk declared in fly.toml
-fly volumes create autoscan_engine_data --region ams --size 1
+fly volumes create autoscan_engine_data --region cdg --size 1
 
 fly secrets import < .env
 fly deploy
@@ -88,8 +88,12 @@ starts it again on the next request. Leave the variable unset locally to never e
 - `GET  /health`
 - `GET  /ai-reanalysis` - authenticated automatic AI backfill progress
 - `POST /grade` - async grading: form fields `assignment`, `r2_key`,
-  `result_key_prefix`, `export_key_prefix`; returns `202 { run_id }` and writes
-  `<result_key_prefix>/<run_id>/result.json` when done. Jobs run one at a time;
+  `result_key_prefix`, `export_key_prefix`, and optional `callback_url`; returns
+  `202 { run_id }` and writes `<result_key_prefix>/<run_id>/result.json` when done.
+  Once the run settles (done, failed or cancelled) the engine POSTs
+  `{ "run_id": … }` to `callback_url` with the `X-Autoscan-Secret` header,
+  retrying network errors and 5xx a few times; the receiver reads the outcome
+  from `GET /progress/{run_id}`. Jobs run one at a time;
   later ones report the `Queued` stage until their turn.
 - `DELETE /grade/{run_id}` - cancels a queued or running grade job (404 once finished)
 - `GET  /progress/{token}` - `{ fraction, stage, state, detail? }` for a grade run id
